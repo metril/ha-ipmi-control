@@ -21,7 +21,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import IpmiDataUpdateCoordinator
-from .ipmi import IpmiAuthError, IpmiClient
+from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,6 +119,8 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
             )
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(str(err)) from err
+        except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
 
         if not result:

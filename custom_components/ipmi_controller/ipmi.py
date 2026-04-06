@@ -43,6 +43,11 @@ class IpmiClient:
         self._fan_config = fan_config or {}
         self._sdr_cache: dict[str, int] | None = None
 
+    @property
+    def has_fan_mode_query(self) -> bool:
+        """Return True if fan mode querying is configured."""
+        return bool(self._fan_config.get("fan_mode_query_command"))
+
     def _get_connection(self, privilege: str = "operator") -> ipmi_command.Command:
         """Create an IPMI connection with appropriate credentials.
 
@@ -181,9 +186,9 @@ class IpmiClient:
         try:
             conn = self._get_connection("operator")
             try:
-                sdr_data = conn.get_sensor_data()
-                for sensor_name, sensor_info in sdr_data.items():
-                    cache[sensor_name] = sensor_info.get("sensor_number", -1)
+                conn.init_sdr()
+                for sensor_number, entry in conn._sdr.sensors.items():
+                    cache[entry.name] = sensor_number
             finally:
                 conn.ipmi_session.logout()
         except Exception as err:

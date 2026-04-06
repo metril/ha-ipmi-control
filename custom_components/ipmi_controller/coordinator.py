@@ -54,7 +54,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(str(err)) from err
 
         fan_mode = None
-        if self.client._fan_config.get("fan_mode_query_command"):
+        if self.client.has_fan_mode_query:
             try:
                 fan_mode = await self.hass.async_add_executor_job(
                     self.client.get_fan_mode

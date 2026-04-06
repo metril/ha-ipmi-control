@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_FANS, CONF_HOST_NAME, DOMAIN
-from .ipmi import IpmiAuthError, IpmiClient
+from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +63,8 @@ class IpmiSetThresholdsButton(ButtonEntity):
             )
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(str(err)) from err
+        except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
 
         if not result:
