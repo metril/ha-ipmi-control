@@ -1,0 +1,101 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "IPMI Connection",
+        "description": "Enter the connection details for your IPMI host.",
+        "data": {
+          "host": "Host name",
+          "ip": "BMC IP address",
+          "operator_username": "Operator username",
+          "operator_password": "Operator password",
+          "admin_username": "Administrator username",
+          "admin_password": "Administrator password"
+        },
+        "data_description": {
+          "host": "A short name for this host (e.g., menoetius)",
+          "ip": "The IP address of the BMC/IPMI interface",
+          "operator_username": "Used for chassis power operations",
+          "admin_username": "Used for fan control and threshold operations"
+        }
+      },
+      "power": {
+        "title": "Power Control",
+        "description": "Configure power control policy and polling interval.",
+        "data": {
+          "power_control": "Power control policy",
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "power_control": "Which power operations are allowed (both, on, off, none)",
+          "scan_interval": "How often to poll the BMC for state changes (5-300 seconds)"
+        }
+      },
+      "fan_profile": {
+        "title": "Fan Control",
+        "description": "Select a motherboard profile for fan mode control.",
+        "data": {
+          "motherboard": "Motherboard profile"
+        },
+        "data_description": {
+          "motherboard": "Select 'none' to skip fan control, or a profile to enable fan mode management"
+        }
+      },
+      "fans": {
+        "title": "Fan Sensors",
+        "description": "Configure fan sensors and thresholds.\n\nFormat: {fans_format}",
+        "data": {
+          "fans": "Fan configuration"
+        },
+        "data_description": {
+          "fans": "Leave empty if no threshold management is needed"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate IPMI",
+        "description": "The IPMI credentials are no longer valid. Please enter updated credentials.",
+        "data": {
+          "operator_username": "Operator username",
+          "operator_password": "Operator password",
+          "admin_username": "Administrator username",
+          "admin_password": "Administrator password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure IPMI Host",
+        "description": "Update the connection details for this IPMI host.",
+        "data": {
+          "host": "Host name",
+          "ip": "BMC IP address",
+          "operator_username": "Operator username",
+          "operator_password": "Operator password",
+          "admin_username": "Administrator username",
+          "admin_password": "Administrator password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to IPMI host",
+      "invalid_auth": "Invalid IPMI credentials",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This IPMI host is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IPMI Controller Options",
+        "description": "Adjust power control, polling, fan profile, and fan sensor settings.",
+        "data": {
+          "power_control": "Power control policy",
+          "scan_interval": "Poll interval (seconds)",
+          "motherboard": "Motherboard profile",
+          "fans": "Fan configuration"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "ipmi_controller",
+  "name": "IPMI Controller",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "",
+  "iot_class": "local_polling",
+  "requirements": ["pyghmi>=1.5.0"],
+  "version": "1.0.0"
+}
