@@ -1,6 +1,7 @@
 name: "IPMI Control"
 version: "1.0.0"
 slug: "ipmi_control"
+image: ghcr.io/metril/ha-ipmi-control-{arch}
 description: "IPMI/BMC management proxy for Home Assistant"
 url: "https://github.com/metril/ha-ipmi-control"
 arch:
