@@ -23,6 +23,15 @@ CONF_FAN_MODE_RESPONSE_MAPPING = "fan_mode_response_mapping"
 CONF_FAN_MODE_DISPLAY_MAPPING = "fan_mode_display_mapping"
 CONF_VIRTUAL_MODE_MAPPING = "virtual_mode_mapping"
 CONF_FANS = "fans"
+CONF_SELECTED_FANS = "selected_fans"
+
+# Fan threshold field keys
+CONF_FAN_LNR = "fan_lnr"
+CONF_FAN_LC = "fan_lc"
+CONF_FAN_LNC = "fan_lnc"
+CONF_FAN_UNC = "fan_unc"
+CONF_FAN_UC = "fan_uc"
+CONF_FAN_UNR = "fan_unr"
 
 # Power control policies
 POWER_CONTROL_BOTH = "both"

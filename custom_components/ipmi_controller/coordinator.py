@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .const import CONF_HOST_NAME, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+from .const import CONF_FANS, CONF_HOST_NAME, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,7 +64,20 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except IpmiConnectionError as err:
                 raise UpdateFailed(str(err)) from err
 
+        fan_thresholds: dict[str, dict[str, int]] = {}
+        fans = self.entry.options.get(CONF_FANS, [])
+        if fans:
+            try:
+                fan_thresholds = await self.hass.async_add_executor_job(
+                    self.client.get_all_fan_thresholds, fans
+                )
+            except IpmiAuthError as err:
+                raise ConfigEntryAuthFailed(str(err)) from err
+            except IpmiConnectionError as err:
+                raise UpdateFailed(str(err)) from err
+
         return {
             "power": power_state,
             "fan_mode": fan_mode,
+            "fan_thresholds": fan_thresholds,
         }

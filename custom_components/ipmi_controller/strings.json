@@ -41,14 +41,23 @@
           "motherboard": "Select 'none' to skip fan control, or a profile to enable fan mode management"
         }
       },
-      "fans": {
+      "fan_select": {
         "title": "Fan Sensors",
-        "description": "Configure fan sensors and thresholds.\n\nFormat: {fans_format}",
+        "description": "Select which fan sensors you want to manage thresholds for. Leave empty to skip.",
         "data": {
-          "fans": "Fan configuration"
-        },
-        "data_description": {
-          "fans": "Leave empty if no threshold management is needed"
+          "selected_fans": "Fan sensors"
+        }
+      },
+      "fan_thresholds": {
+        "title": "Thresholds for {fan_name}",
+        "description": "Set the threshold values for {fan_name}. Values are pre-filled from the BMC.",
+        "data": {
+          "fan_lnr": "Lower Non-Recoverable (LNR)",
+          "fan_lc": "Lower Critical (LC)",
+          "fan_lnc": "Lower Non-Critical (LNC)",
+          "fan_unc": "Upper Non-Critical (UNC)",
+          "fan_uc": "Upper Critical (UC)",
+          "fan_unr": "Upper Non-Recoverable (UNR)"
         }
       },
       "reauth_confirm": {
@@ -88,12 +97,30 @@
     "step": {
       "init": {
         "title": "IPMI Controller Options",
-        "description": "Adjust power control, polling, fan profile, and fan sensor settings.",
+        "description": "Adjust power control, polling, and fan profile settings.",
         "data": {
           "power_control": "Power control policy",
           "scan_interval": "Poll interval (seconds)",
-          "motherboard": "Motherboard profile",
-          "fans": "Fan configuration"
+          "motherboard": "Motherboard profile"
+        }
+      },
+      "fan_select": {
+        "title": "Fan Sensors",
+        "description": "Select which fan sensors you want to manage thresholds for. Leave empty to skip.",
+        "data": {
+          "selected_fans": "Fan sensors"
+        }
+      },
+      "fan_thresholds": {
+        "title": "Thresholds for {fan_name}",
+        "description": "Set the threshold values for {fan_name}.",
+        "data": {
+          "fan_lnr": "Lower Non-Recoverable (LNR)",
+          "fan_lc": "Lower Critical (LC)",
+          "fan_lnc": "Lower Non-Critical (LNC)",
+          "fan_unc": "Upper Non-Critical (UNC)",
+          "fan_uc": "Upper Critical (UC)",
+          "fan_unr": "Upper Non-Recoverable (UNR)"
         }
       }
     }

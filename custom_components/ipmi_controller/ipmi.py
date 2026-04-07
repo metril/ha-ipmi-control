@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import struct
 from typing import Any
 
 from pyghmi.ipmi import command as ipmi_command
@@ -14,6 +13,7 @@ _LOGGER = logging.getLogger(__name__)
 # IPMI Set Sensor Thresholds command
 SENSOR_EVENT_NETFN = 0x04
 SET_SENSOR_THRESHOLD_CMD = 0x26
+GET_SENSOR_THRESHOLD_CMD = 0x27
 
 
 class IpmiConnectionError(Exception):
@@ -296,6 +296,78 @@ class IpmiClient:
             return False
 
         return success
+
+    def get_fan_sensors(self) -> list[str]:
+        """Query SDR and return names of all fan-type sensors (sensor type 0x04)."""
+        fan_names: list[str] = []
+        try:
+            conn = self._get_connection("operator")
+            try:
+                conn.init_sdr()
+                for sensor_number, entry in conn._sdr.sensors.items():
+                    # Sensor type 0x04 = Fan
+                    if hasattr(entry, "sensor_type") and entry.sensor_type == 0x04:
+                        fan_names.append(entry.name)
+                    elif "fan" in entry.name.lower():
+                        # Fallback: match by name if sensor_type not available
+                        fan_names.append(entry.name)
+            finally:
+                conn.ipmi_session.logout()
+        except Exception as err:
+            _LOGGER.error("Error querying fan sensors from %s: %s", self.ip, err)
+        return fan_names
+
+    def get_fan_thresholds(self, sensor_number: int) -> dict[str, int] | None:
+        """Read current threshold values for a sensor from the BMC.
+
+        Uses IPMI Get Sensor Thresholds command (netfn=0x04, cmd=0x27).
+        Returns dict with lnr, lc, lnc, unc, uc, unr or None on error.
+        """
+        try:
+            conn = self._get_connection("operator")
+            try:
+                result = conn.xraw_command(
+                    netfn=SENSOR_EVENT_NETFN,
+                    command=GET_SENSOR_THRESHOLD_CMD,
+                    data=bytes([sensor_number]),
+                )
+                if result and "data" in result and len(result["data"]) >= 7:
+                    data = result["data"]
+                    return {
+                        "lnr": data[1],
+                        "lc": data[2],
+                        "lnc": data[3],
+                        "unc": data[4],
+                        "uc": data[5],
+                        "unr": data[6],
+                    }
+                return None
+            finally:
+                conn.ipmi_session.logout()
+        except Exception as err:
+            _LOGGER.error(
+                "Error reading thresholds for sensor %d on %s: %s",
+                sensor_number, self.ip, err,
+            )
+            return None
+
+    def get_all_fan_thresholds(
+        self, fans: list[dict]
+    ) -> dict[str, dict[str, int]]:
+        """Read current thresholds for all configured fans.
+
+        Returns {fan_name: {lnr, lc, lnc, unc, uc, unr}}.
+        """
+        result: dict[str, dict[str, int]] = {}
+        for fan in fans:
+            fan_name = fan["name"]
+            sensor_num = self._get_sensor_number(fan_name)
+            if sensor_num is None:
+                continue
+            thresholds = self.get_fan_thresholds(sensor_num)
+            if thresholds is not None:
+                result[fan_name] = thresholds
+        return result
 
     @staticmethod
     def test_connection(ip: str, user: str, password: str) -> None:
