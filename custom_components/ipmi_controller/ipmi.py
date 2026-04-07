@@ -194,8 +194,12 @@ class IpmiClient:
                     cache[entry.name] = sensor_number
             finally:
                 conn.ipmi_session.logout()
+        except (IpmiAuthError, IpmiConnectionError):
+            raise
         except Exception as err:
-            _LOGGER.error("Error building SDR cache from %s: %s", self.ip, err)
+            raise IpmiConnectionError(
+                f"Error building SDR cache from {self.ip}: {err}"
+            ) from err
         return cache
 
     def _get_sensor_number(self, fan_name: str) -> int | None:
@@ -295,8 +299,9 @@ class IpmiClient:
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error setting fan thresholds on %s: %s", self.ip, err)
-            return False
+            raise IpmiConnectionError(
+                f"Error setting fan thresholds on {self.ip}: {err}"
+            ) from err
 
         return success
 
@@ -316,8 +321,12 @@ class IpmiClient:
                         fan_names.append(entry.name)
             finally:
                 conn.ipmi_session.logout()
+        except (IpmiAuthError, IpmiConnectionError):
+            raise
         except Exception as err:
-            _LOGGER.error("Error querying fan sensors from %s: %s", self.ip, err)
+            raise IpmiConnectionError(
+                f"Error querying fan sensors from {self.ip}: {err}"
+            ) from err
         return fan_names
 
     def get_fan_thresholds(self, sensor_number: int) -> dict[str, int] | None:
