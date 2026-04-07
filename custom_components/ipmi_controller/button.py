@@ -58,9 +58,7 @@ class IpmiSetThresholdsButton(ButtonEntity):
             return
 
         try:
-            result = await self.hass.async_add_executor_job(
-                self._client.set_fan_thresholds, fans
-            )
+            result = await self._client.set_fan_thresholds(fans)
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err

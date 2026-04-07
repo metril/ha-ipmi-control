@@ -5,6 +5,7 @@ from __future__ import annotations
 DOMAIN = "ipmi_controller"
 
 # Config entry data keys
+CONF_ADDON_URL = "addon_url"
 CONF_HOST_NAME = "host"
 CONF_IPMI_IP = "ip"
 CONF_OPERATOR_USER = "operator_username"

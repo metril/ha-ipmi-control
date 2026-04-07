@@ -114,9 +114,7 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
         self._last_ha_selection = option
 
         try:
-            await self.hass.async_add_executor_job(
-                self._client.set_fan_mode, internal_mode
-            )
+            await self._client.set_fan_mode(internal_mode)
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err

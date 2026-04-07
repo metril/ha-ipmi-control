@@ -1,0 +1,19 @@
+name: "IPMI Control"
+version: "1.0.0"
+slug: "ipmi_control"
+description: "IPMI/BMC management proxy for Home Assistant"
+url: "https://github.com/metril/ha-ipmi-control"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+init: false
+startup: application
+boot: auto
+host_network: false
+discovery:
+  - ipmi_control
+options:
+  max_concurrent: 8
+schema:
+  max_concurrent: int(1,32)

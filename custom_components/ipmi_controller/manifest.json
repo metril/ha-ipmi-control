@@ -6,6 +6,6 @@
   "dependencies": [],
   "documentation": "",
   "iot_class": "local_polling",
-  "requirements": ["pyghmi>=1.5.0"],
-  "version": "1.0.0"
+  "requirements": [],
+  "version": "2.0.0"
 }

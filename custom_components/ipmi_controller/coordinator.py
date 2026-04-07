@@ -43,11 +43,9 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from IPMI."""
+        """Fetch data from IPMI via add-on."""
         try:
-            power_state = await self.hass.async_add_executor_job(
-                self.client.get_chassis_status
-            )
+            power_state = await self.client.get_chassis_status()
         except IpmiAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except IpmiConnectionError as err:
@@ -56,9 +54,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fan_mode = None
         if self.client.has_fan_mode_query:
             try:
-                fan_mode = await self.hass.async_add_executor_job(
-                    self.client.get_fan_mode
-                )
+                fan_mode = await self.client.get_fan_mode()
             except IpmiAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
             except IpmiConnectionError as err:
@@ -68,9 +64,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fans = self.entry.options.get(CONF_FANS, [])
         if fans:
             try:
-                fan_thresholds = await self.hass.async_add_executor_job(
-                    self.client.get_all_fan_thresholds, fans
-                )
+                fan_thresholds = await self.client.get_all_fan_thresholds(fans)
             except IpmiAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
             except IpmiConnectionError as err:
