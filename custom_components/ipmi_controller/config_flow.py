@@ -55,6 +55,8 @@ from .const import (
     POWER_CONTROL_OFF,
     POWER_CONTROL_ON,
 )
+
+CONF_MANUAL_FANS = "manual_fans"
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -195,52 +197,63 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_fan_select(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 4: Select fan sensors from SDR."""
+        """Step 4: Select fan sensors from SDR or enter manually."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_FANS, [])
+            manual = user_input.get(CONF_MANUAL_FANS, "").strip()
+
+            # Merge SDR selections with manually entered names
+            if manual:
+                for name in manual.split(","):
+                    name = name.strip()
+                    if name and name not in selected:
+                        selected.append(name)
+
             if selected:
                 self._selected_fans = selected
                 self._fan_index = 0
                 return await self.async_step_fan_thresholds()
             else:
-                # No fans selected — skip thresholds
                 self._options[CONF_FANS] = []
                 return self._create_entry()
 
         # Query SDR for fan sensors
         client = self._get_client()
+        sdr_error = False
         try:
             fan_sensors = await self.hass.async_add_executor_job(
                 client.get_fan_sensors
             )
         except Exception:
-            _LOGGER.exception("Failed to query fan sensors")
+            _LOGGER.exception("Failed to query fan sensors from SDR")
             fan_sensors = []
+            sdr_error = True
 
-        if not fan_sensors:
-            # No fans found — skip
-            self._options[CONF_FANS] = []
-            return self._create_entry()
+        schema_fields: dict[Any, Any] = {}
 
-        fan_options = [
-            SelectOptionDict(value=name, label=name) for name in fan_sensors
-        ]
+        if fan_sensors:
+            fan_options = [
+                SelectOptionDict(value=name, label=name) for name in fan_sensors
+            ]
+            schema_fields[vol.Optional(CONF_SELECTED_FANS)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=fan_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
+
+        # Always show manual entry field
+        schema_fields[vol.Optional(CONF_MANUAL_FANS, default="")] = str
+
+        if sdr_error:
+            errors["base"] = "sdr_query_failed"
 
         return self.async_show_form(
             step_id="fan_select",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_SELECTED_FANS): SelectSelector(
-                        SelectSelectorConfig(
-                            options=fan_options,
-                            multiple=True,
-                            mode=SelectSelectorMode.LIST,
-                        )
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
             errors=errors,
         )
 
@@ -517,8 +530,18 @@ class IpmiControllerOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Select fans for threshold configuration."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_FANS, [])
+            manual = user_input.get(CONF_MANUAL_FANS, "").strip()
+
+            if manual:
+                for name in manual.split(","):
+                    name = name.strip()
+                    if name and name not in selected:
+                        selected.append(name)
+
             if selected:
                 self._selected_fans = selected
                 self._fan_index = 0
@@ -529,43 +552,46 @@ class IpmiControllerOptionsFlow(OptionsFlow):
 
         # Query SDR for fan sensors
         client = self._get_client()
+        sdr_error = False
         try:
             fan_sensors = await self.hass.async_add_executor_job(
                 client.get_fan_sensors
             )
         except Exception:
-            _LOGGER.exception("Failed to query fan sensors")
+            _LOGGER.exception("Failed to query fan sensors from SDR")
             fan_sensors = []
+            sdr_error = True
 
-        if not fan_sensors:
-            self._new_options[CONF_FANS] = []
-            return self.async_create_entry(title="", data=self._new_options)
+        schema_fields: dict[Any, Any] = {}
 
-        # Pre-select currently configured fans
-        current_fan_names = [
-            f["name"] for f in self._config_entry.options.get(CONF_FANS, [])
-        ]
-        default_selection = [n for n in current_fan_names if n in fan_sensors]
+        if fan_sensors:
+            current_fan_names = [
+                f["name"] for f in self._config_entry.options.get(CONF_FANS, [])
+            ]
+            default_selection = [n for n in current_fan_names if n in fan_sensors]
 
-        fan_options = [
-            SelectOptionDict(value=name, label=name) for name in fan_sensors
-        ]
+            fan_options = [
+                SelectOptionDict(value=name, label=name) for name in fan_sensors
+            ]
+            schema_fields[vol.Optional(
+                CONF_SELECTED_FANS, default=default_selection
+            )] = SelectSelector(
+                SelectSelectorConfig(
+                    options=fan_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
+
+        schema_fields[vol.Optional(CONF_MANUAL_FANS, default="")] = str
+
+        if sdr_error:
+            errors["base"] = "sdr_query_failed"
 
         return self.async_show_form(
             step_id="fan_select",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_SELECTED_FANS, default=default_selection
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=fan_options,
-                            multiple=True,
-                            mode=SelectSelectorMode.LIST,
-                        )
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
+            errors=errors,
         )
 
     async def async_step_fan_thresholds(

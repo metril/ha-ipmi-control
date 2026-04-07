@@ -43,9 +43,13 @@
       },
       "fan_select": {
         "title": "Fan Sensors",
-        "description": "Select which fan sensors you want to manage thresholds for. Leave empty to skip.",
+        "description": "Select fan sensors to manage thresholds for, or enter names manually. Leave both empty to skip.",
         "data": {
-          "selected_fans": "Fan sensors"
+          "selected_fans": "Discovered fan sensors",
+          "manual_fans": "Manual fan names (comma-separated)"
+        },
+        "data_description": {
+          "manual_fans": "Enter fan sensor names manually if SDR discovery failed or is incomplete (e.g., FAN 1, FAN 2, FAN A)"
         }
       },
       "fan_thresholds": {
@@ -86,6 +90,7 @@
     "error": {
       "cannot_connect": "Failed to connect to IPMI host",
       "invalid_auth": "Invalid IPMI credentials",
+      "sdr_query_failed": "Failed to query fan sensors from BMC. You can enter fan names manually below.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
@@ -106,9 +111,13 @@
       },
       "fan_select": {
         "title": "Fan Sensors",
-        "description": "Select which fan sensors you want to manage thresholds for. Leave empty to skip.",
+        "description": "Select fan sensors to manage thresholds for, or enter names manually. Leave both empty to skip.",
         "data": {
-          "selected_fans": "Fan sensors"
+          "selected_fans": "Discovered fan sensors",
+          "manual_fans": "Manual fan names (comma-separated)"
+        },
+        "data_description": {
+          "manual_fans": "Enter fan sensor names manually if SDR discovery failed or is incomplete (e.g., FAN 1, FAN 2, FAN A)"
         }
       },
       "fan_thresholds": {
