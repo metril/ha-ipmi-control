@@ -114,7 +114,7 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
         self._last_ha_selection = option
 
         try:
-            result = await self.hass.async_add_executor_job(
+            await self.hass.async_add_executor_job(
                 self._client.set_fan_mode, internal_mode
             )
         except IpmiAuthError as err:
@@ -122,9 +122,6 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
-
-        if not result:
-            raise HomeAssistantError(f"Failed to set fan mode to {option}")
 
         await self.coordinator.async_request_refresh()
 

@@ -80,8 +80,8 @@ class IpmiClient:
                 f"Failed to connect to {self.ip}: {err}"
             ) from err
 
-    def get_chassis_status(self) -> bool | None:
-        """Get chassis power status. Returns True=on, False=off, None=error."""
+    def get_chassis_status(self) -> bool:
+        """Get chassis power status. Returns True=on, False=off."""
         try:
             conn = self._get_connection("operator")
             try:
@@ -93,38 +93,39 @@ class IpmiClient:
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error getting chassis status from %s: %s", self.ip, err)
-            return None
+            raise IpmiConnectionError(
+                f"Error getting chassis status from {self.ip}: {err}"
+            ) from err
 
-    def power_on(self) -> bool:
+    def power_on(self) -> None:
         """Send power on command."""
         try:
             conn = self._get_connection("operator")
             try:
                 conn.set_power("on")
-                return True
             finally:
                 conn.ipmi_session.logout()
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error powering on %s: %s", self.ip, err)
-            return False
+            raise IpmiConnectionError(
+                f"Error powering on {self.ip}: {err}"
+            ) from err
 
-    def power_off(self) -> bool:
+    def power_off(self) -> None:
         """Send soft power off (ACPI shutdown) command."""
         try:
             conn = self._get_connection("operator")
             try:
                 conn.set_power("shutdown")
-                return True
             finally:
                 conn.ipmi_session.logout()
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error powering off %s: %s", self.ip, err)
-            return False
+            raise IpmiConnectionError(
+                f"Error powering off {self.ip}: {err}"
+            ) from err
 
     def get_fan_mode(self) -> str | None:
         """Query current fan mode using configured raw command."""
@@ -151,16 +152,18 @@ class IpmiClient:
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error querying fan mode from %s: %s", self.ip, err)
-            return None
+            raise IpmiConnectionError(
+                f"Error querying fan mode from {self.ip}: {err}"
+            ) from err
 
-    def set_fan_mode(self, mode: str) -> bool:
+    def set_fan_mode(self, mode: str) -> None:
         """Set fan mode by executing configured raw commands."""
         mode_commands = self._fan_config.get("fan_mode_commands", {})
         commands = mode_commands.get(mode)
         if not commands:
-            _LOGGER.error("No commands configured for fan mode '%s'", mode)
-            return False
+            raise IpmiConnectionError(
+                f"No commands configured for fan mode '{mode}'"
+            )
 
         try:
             conn = self._get_connection("administrator")
@@ -171,14 +174,14 @@ class IpmiClient:
                         command=cmd["command"],
                         data=bytes(cmd.get("data", [])),
                     )
-                return True
             finally:
                 conn.ipmi_session.logout()
         except (IpmiAuthError, IpmiConnectionError):
             raise
         except Exception as err:
-            _LOGGER.error("Error setting fan mode on %s: %s", self.ip, err)
-            return False
+            raise IpmiConnectionError(
+                f"Error setting fan mode on {self.ip}: {err}"
+            ) from err
 
     def _build_sdr_cache(self) -> dict[str, int]:
         """Query SDR to build fan_name → sensor_number mapping."""

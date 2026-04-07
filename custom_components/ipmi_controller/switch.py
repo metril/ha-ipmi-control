@@ -86,15 +86,12 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError("Power ON is not permitted by configuration")
 
         try:
-            result = await self.hass.async_add_executor_job(self._client.power_on)
+            await self.hass.async_add_executor_job(self._client.power_on)
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
-
-        if not result:
-            raise HomeAssistantError("Failed to send power on command")
 
         await self.coordinator.async_request_refresh()
 
@@ -107,14 +104,11 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError("Power OFF is not permitted by configuration")
 
         try:
-            result = await self.hass.async_add_executor_job(self._client.power_off)
+            await self.hass.async_add_executor_job(self._client.power_off)
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
-
-        if not result:
-            raise HomeAssistantError("Failed to send power off command")
 
         await self.coordinator.async_request_refresh()
