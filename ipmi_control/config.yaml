@@ -6,7 +6,6 @@ url: "https://github.com/metril/ha-ipmi-control"
 arch:
   - amd64
   - aarch64
-  - armv7
 init: false
 startup: application
 boot: auto
