@@ -24,28 +24,28 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_ADDON_URL,
-    CONF_ADMIN_PASS,
-    CONF_ADMIN_USER,
-    CONF_FAN_LC,
-    CONF_FAN_LNC,
-    CONF_FAN_LNR,
     CONF_FAN_MODE_COMMANDS,
     CONF_FAN_MODE_DISPLAY_MAPPING,
     CONF_FAN_MODE_QUERY_COMMAND,
     CONF_FAN_MODE_RESPONSE_MAPPING,
     CONF_FAN_MODES,
-    CONF_FAN_UC,
-    CONF_FAN_UNC,
-    CONF_FAN_UNR,
-    CONF_FANS,
     CONF_HOST_NAME,
     CONF_IPMI_IP,
     CONF_MOTHERBOARD,
-    CONF_OPERATOR_PASS,
-    CONF_OPERATOR_USER,
+    CONF_PASSWORD,
     CONF_POWER_CONTROL,
+    CONF_PRIVILEGE_LEVEL,
     CONF_SCAN_INTERVAL,
-    CONF_SELECTED_FANS,
+    CONF_SELECTED_SENSORS,
+    CONF_SENSORS,
+    CONF_THRESH_LC,
+    CONF_THRESH_LNC,
+    CONF_THRESH_LNR,
+    CONF_THRESH_UC,
+    CONF_THRESH_UNC,
+    CONF_THRESH_UNR,
+    CONF_THRESHOLD_SENSORS,
+    CONF_USERNAME,
     CONF_VIRTUAL_MODE_MAPPING,
     DEFAULT_POWER_CONTROL,
     DEFAULT_SCAN_INTERVAL,
@@ -58,8 +58,10 @@ from .const import (
     POWER_CONTROL_ON,
 )
 
-CONF_MANUAL_FANS = "manual_fans"
+CONF_MANUAL_SENSORS = "manual_sensors"
 DEFAULT_ADDON_URL = "http://local-ipmi-control:8099"
+
+PRIVILEGE_LEVELS = ["ADMINISTRATOR", "OPERATOR"]
 
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
@@ -78,7 +80,7 @@ MOTHERBOARD_OPTIONS = [MOTHERBOARD_NONE] + list(MOTHERBOARD_PROFILES.keys())
 class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for IPMI Controller."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -86,8 +88,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._options: dict[str, Any] = {}
         self._addon_url: str = DEFAULT_ADDON_URL
         self._client: IpmiClient | None = None
-        self._selected_fans: list[str] = []
-        self._fan_index: int = 0
 
     def _get_client(self) -> IpmiClient:
         """Get or create an IpmiClient from collected data."""
@@ -97,10 +97,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 session=session,
                 addon_url=self._addon_url,
                 host_ip=self._data[CONF_IPMI_IP],
-                operator_user=self._data[CONF_OPERATOR_USER],
-                operator_pass=self._data[CONF_OPERATOR_PASS],
-                admin_user=self._data[CONF_ADMIN_USER],
-                admin_pass=self._data[CONF_ADMIN_PASS],
+                username=self._data[CONF_USERNAME],
+                password=self._data[CONF_PASSWORD],
+                privilege_level=self._data[CONF_PRIVILEGE_LEVEL],
             )
         return self._client
 
@@ -120,19 +119,34 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             except IpmiConnectionError:
                 errors["base"] = "addon_not_reachable"
             else:
-                # Verify IPMI connection via add-on
+                # Verify IPMI connection
                 try:
                     await IpmiClient.test_ipmi_connection(
                         session,
                         self._addon_url,
                         user_input[CONF_IPMI_IP],
-                        user_input[CONF_OPERATOR_USER],
-                        user_input[CONF_OPERATOR_PASS],
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
                     )
                 except IpmiAuthError:
                     errors["base"] = "invalid_auth"
                 except IpmiConnectionError:
                     errors["base"] = "cannot_connect"
+
+            # Verify admin privilege if selected
+            if not errors and user_input[CONF_PRIVILEGE_LEVEL] == "ADMINISTRATOR":
+                try:
+                    await IpmiClient.test_admin_privilege(
+                        session,
+                        self._addon_url,
+                        user_input[CONF_IPMI_IP],
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
+                    )
+                except IpmiAuthError:
+                    errors["base"] = "insufficient_privilege"
+                except IpmiConnectionError:
+                    pass  # connectivity already verified above
 
             if not errors:
                 await self.async_set_unique_id(user_input[CONF_HOST_NAME])
@@ -150,10 +164,19 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_ADDON_URL, default=DEFAULT_ADDON_URL): str,
                     vol.Required(CONF_HOST_NAME): str,
                     vol.Required(CONF_IPMI_IP): str,
-                    vol.Required(CONF_OPERATOR_USER, default="HomeAssistant"): str,
-                    vol.Required(CONF_OPERATOR_PASS): str,
-                    vol.Required(CONF_ADMIN_USER, default="Administrator"): str,
-                    vol.Required(CONF_ADMIN_PASS): str,
+                    vol.Required(CONF_USERNAME, default="Administrator"): str,
+                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(
+                        CONF_PRIVILEGE_LEVEL, default="ADMINISTRATOR"
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value="ADMINISTRATOR", label="Administrator"),
+                                SelectOptionDict(value="OPERATOR", label="Operator"),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -214,7 +237,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_VIRTUAL_MODE_MAPPING, {}
                 )
 
-            return await self.async_step_fan_select()
+            return await self.async_step_sensor_select()
 
         return self.async_show_form(
             step_id="fan_profile",
@@ -227,15 +250,15 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_fan_select(
+    async def async_step_sensor_select(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 4: Select fan sensors or enter manually."""
+        """Step 4: Select BMC sensors to expose."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            selected = user_input.get(CONF_SELECTED_FANS, [])
-            manual = user_input.get(CONF_MANUAL_FANS, "").strip()
+            selected = user_input.get(CONF_SELECTED_SENSORS, [])
+            manual = user_input.get(CONF_MANUAL_SENSORS, "").strip()
 
             if manual:
                 for name in manual.split(","):
@@ -244,96 +267,54 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                         selected.append(name)
 
             if selected:
-                self._selected_fans = selected
-                self._fan_index = 0
-                return await self.async_step_fan_thresholds()
+                # Build sensor entries — look up units from SDR data if available
+                sensor_entries = []
+                for name in selected:
+                    entry = {"name": name, "unit": self._sdr_units.get(name, "")}
+                    sensor_entries.append(entry)
+                self._options[CONF_SENSORS] = sensor_entries
             else:
-                self._options[CONF_FANS] = []
-                return self._create_entry()
+                self._options[CONF_SENSORS] = []
 
-        # Query SDR for fan sensors via add-on
+            return self._create_entry()
+
+        # Query SDR for all sensors
         client = self._get_client()
         sdr_error = False
+        sdr_sensors: list[dict[str, str]] = []
         try:
-            fan_sensors = await client.get_fan_sensors()
+            sdr_sensors = await client.get_sdr_list()
         except Exception:
-            _LOGGER.exception("Failed to query fan sensors")
-            fan_sensors = []
+            _LOGGER.exception("Failed to query SDR sensors")
             sdr_error = True
+
+        # Store unit mapping for later
+        self._sdr_units: dict[str, str] = {s["name"]: s["unit"] for s in sdr_sensors}
 
         schema_fields: dict[Any, Any] = {}
 
-        if fan_sensors:
-            fan_options = [
-                SelectOptionDict(value=name, label=name) for name in fan_sensors
+        if sdr_sensors:
+            sensor_options = [
+                SelectOptionDict(value=s["name"], label=f"{s['name']} ({s['unit']})" if s["unit"] else s["name"])
+                for s in sdr_sensors
             ]
-            schema_fields[vol.Optional(CONF_SELECTED_FANS)] = SelectSelector(
+            schema_fields[vol.Optional(CONF_SELECTED_SENSORS)] = SelectSelector(
                 SelectSelectorConfig(
-                    options=fan_options,
+                    options=sensor_options,
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )
             )
 
-        schema_fields[vol.Optional(CONF_MANUAL_FANS, default="")] = str
+        schema_fields[vol.Optional(CONF_MANUAL_SENSORS, default="")] = str
 
         if sdr_error:
             errors["base"] = "sdr_query_failed"
 
         return self.async_show_form(
-            step_id="fan_select",
+            step_id="sensor_select",
             data_schema=vol.Schema(schema_fields),
             errors=errors,
-        )
-
-    async def async_step_fan_thresholds(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Step 5: Configure thresholds for each selected fan."""
-        if user_input is not None:
-            fan_name = self._selected_fans[self._fan_index]
-            fan_entry: dict[str, Any] = {"name": fan_name, "thresholds": {}}
-
-            lower = [
-                user_input.get(CONF_FAN_LNR),
-                user_input.get(CONF_FAN_LC),
-                user_input.get(CONF_FAN_LNC),
-            ]
-            upper = [
-                user_input.get(CONF_FAN_UNC),
-                user_input.get(CONF_FAN_UC),
-                user_input.get(CONF_FAN_UNR),
-            ]
-
-            if any(v is not None for v in lower):
-                fan_entry["thresholds"]["lower"] = [v or 0 for v in lower]
-            if any(v is not None for v in upper):
-                fan_entry["thresholds"]["upper"] = [v or 0 for v in upper]
-
-            self._options.setdefault(CONF_FANS, []).append(fan_entry)
-            self._fan_index += 1
-
-            if self._fan_index < len(self._selected_fans):
-                return await self.async_step_fan_thresholds()
-
-            return self._create_entry()
-
-        fan_name = self._selected_fans[self._fan_index]
-        defaults = await self._read_fan_thresholds(fan_name)
-
-        return self.async_show_form(
-            step_id="fan_thresholds",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_FAN_LNR, default=defaults.get("lnr")): int,
-                    vol.Optional(CONF_FAN_LC, default=defaults.get("lc")): int,
-                    vol.Optional(CONF_FAN_LNC, default=defaults.get("lnc")): int,
-                    vol.Optional(CONF_FAN_UNC, default=defaults.get("unc")): int,
-                    vol.Optional(CONF_FAN_UC, default=defaults.get("uc")): int,
-                    vol.Optional(CONF_FAN_UNR, default=defaults.get("unr")): int,
-                }
-            ),
-            description_placeholders={"fan_name": fan_name},
         )
 
     def _create_entry(self) -> ConfigFlowResult:
@@ -343,17 +324,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             data=self._data,
             options=self._options,
         )
-
-    async def _read_fan_thresholds(self, fan_name: str) -> dict[str, int]:
-        """Read current thresholds for a fan from the BMC via add-on."""
-        client = self._get_client()
-        try:
-            thresholds = await client.get_fan_thresholds(fan_name)
-            if thresholds:
-                return thresholds
-        except Exception:
-            _LOGGER.debug("Could not read thresholds for %s", fan_name)
-        return {}
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
@@ -375,14 +345,29 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     session,
                     reauth_entry.data[CONF_ADDON_URL],
                     reauth_entry.data[CONF_IPMI_IP],
-                    user_input[CONF_OPERATOR_USER],
-                    user_input[CONF_OPERATOR_PASS],
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
                 )
             except IpmiAuthError:
                 errors["base"] = "invalid_auth"
             except IpmiConnectionError:
                 errors["base"] = "cannot_connect"
-            else:
+
+            if not errors and user_input[CONF_PRIVILEGE_LEVEL] == "ADMINISTRATOR":
+                try:
+                    await IpmiClient.test_admin_privilege(
+                        session,
+                        reauth_entry.data[CONF_ADDON_URL],
+                        reauth_entry.data[CONF_IPMI_IP],
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
+                    )
+                except IpmiAuthError:
+                    errors["base"] = "insufficient_privilege"
+                except IpmiConnectionError:
+                    pass
+
+            if not errors:
                 updated_data = {**reauth_entry.data, **user_input}
                 return self.async_update_reload_and_abort(
                     reauth_entry, data=updated_data
@@ -393,15 +378,22 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        CONF_OPERATOR_USER,
-                        default=reauth_entry.data[CONF_OPERATOR_USER],
+                        CONF_USERNAME,
+                        default=reauth_entry.data.get(CONF_USERNAME, ""),
                     ): str,
-                    vol.Required(CONF_OPERATOR_PASS): str,
+                    vol.Required(CONF_PASSWORD): str,
                     vol.Required(
-                        CONF_ADMIN_USER,
-                        default=reauth_entry.data[CONF_ADMIN_USER],
-                    ): str,
-                    vol.Required(CONF_ADMIN_PASS): str,
+                        CONF_PRIVILEGE_LEVEL,
+                        default=reauth_entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR"),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value="ADMINISTRATOR", label="Administrator"),
+                                SelectOptionDict(value="OPERATOR", label="Operator"),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -421,14 +413,29 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     session,
                     user_input.get(CONF_ADDON_URL, reconfigure_entry.data[CONF_ADDON_URL]),
                     user_input[CONF_IPMI_IP],
-                    user_input[CONF_OPERATOR_USER],
-                    user_input[CONF_OPERATOR_PASS],
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
                 )
             except IpmiAuthError:
                 errors["base"] = "invalid_auth"
             except IpmiConnectionError:
                 errors["base"] = "cannot_connect"
-            else:
+
+            if not errors and user_input[CONF_PRIVILEGE_LEVEL] == "ADMINISTRATOR":
+                try:
+                    await IpmiClient.test_admin_privilege(
+                        session,
+                        user_input.get(CONF_ADDON_URL, reconfigure_entry.data[CONF_ADDON_URL]),
+                        user_input[CONF_IPMI_IP],
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
+                    )
+                except IpmiAuthError:
+                    errors["base"] = "insufficient_privilege"
+                except IpmiConnectionError:
+                    pass
+
+            if not errors:
                 return self.async_update_reload_and_abort(
                     reconfigure_entry, data=user_input
                 )
@@ -450,15 +457,22 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                         default=reconfigure_entry.data[CONF_IPMI_IP],
                     ): str,
                     vol.Required(
-                        CONF_OPERATOR_USER,
-                        default=reconfigure_entry.data[CONF_OPERATOR_USER],
+                        CONF_USERNAME,
+                        default=reconfigure_entry.data.get(CONF_USERNAME, ""),
                     ): str,
-                    vol.Required(CONF_OPERATOR_PASS): str,
+                    vol.Required(CONF_PASSWORD): str,
                     vol.Required(
-                        CONF_ADMIN_USER,
-                        default=reconfigure_entry.data[CONF_ADMIN_USER],
-                    ): str,
-                    vol.Required(CONF_ADMIN_PASS): str,
+                        CONF_PRIVILEGE_LEVEL,
+                        default=reconfigure_entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR"),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value="ADMINISTRATOR", label="Administrator"),
+                                SelectOptionDict(value="OPERATOR", label="Operator"),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -481,8 +495,9 @@ class IpmiControllerOptionsFlow(OptionsFlow):
         self._config_entry = config_entry
         self._new_options: dict[str, Any] = {}
         self._client: IpmiClient | None = None
-        self._selected_fans: list[str] = []
-        self._fan_index: int = 0
+        self._selected_threshold_sensors: list[str] = []
+        self._threshold_index: int = 0
+        self._sdr_units: dict[str, str] = {}
 
     def _get_client(self) -> IpmiClient:
         """Get or create an IpmiClient from config entry data."""
@@ -493,10 +508,9 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                 session=session,
                 addon_url=data[CONF_ADDON_URL],
                 host_ip=data[CONF_IPMI_IP],
-                operator_user=data[CONF_OPERATOR_USER],
-                operator_pass=data[CONF_OPERATOR_PASS],
-                admin_user=data[CONF_ADMIN_USER],
-                admin_pass=data[CONF_ADMIN_PASS],
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+                privilege_level=data[CONF_PRIVILEGE_LEVEL],
             )
         return self._client
 
@@ -522,7 +536,7 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                 ]
                 self._new_options[CONF_FAN_MODE_COMMANDS] = profile["fan_mode_commands"]
 
-            return await self.async_step_fan_select()
+            return await self.async_step_sensor_select()
 
         current_opts = self._config_entry.options
 
@@ -546,15 +560,15 @@ class IpmiControllerOptionsFlow(OptionsFlow):
             ),
         )
 
-    async def async_step_fan_select(
+    async def async_step_sensor_select(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Select fans for threshold configuration."""
+        """Select BMC sensors to expose."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            selected = user_input.get(CONF_SELECTED_FANS, [])
-            manual = user_input.get(CONF_MANUAL_FANS, "").strip()
+            selected = user_input.get(CONF_SELECTED_SENSORS, [])
+            manual = user_input.get(CONF_MANUAL_SENSORS, "").strip()
 
             if manual:
                 for name in manual.split(","):
@@ -563,109 +577,193 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                         selected.append(name)
 
             if selected:
-                self._selected_fans = selected
-                self._fan_index = 0
-                return await self.async_step_fan_thresholds()
+                # Preserve existing threshold config for sensors that are still selected
+                existing_sensors = {
+                    s["name"]: s for s in self._config_entry.options.get(CONF_SENSORS, [])
+                }
+                sensor_entries = []
+                for name in selected:
+                    existing = existing_sensors.get(name, {})
+                    entry: dict[str, Any] = {
+                        "name": name,
+                        "unit": self._sdr_units.get(name, existing.get("unit", "")),
+                    }
+                    if existing.get("thresholds"):
+                        entry["thresholds"] = existing["thresholds"]
+                    sensor_entries.append(entry)
+                self._new_options[CONF_SENSORS] = sensor_entries
             else:
-                self._new_options[CONF_FANS] = []
-                return self.async_create_entry(title="", data=self._new_options)
+                self._new_options[CONF_SENSORS] = []
+
+            # If admin, proceed to threshold configuration
+            privilege = self._config_entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR")
+            if selected and privilege == "ADMINISTRATOR":
+                return await self.async_step_threshold_sensor_select()
+
+            return self.async_create_entry(title="", data=self._new_options)
 
         client = self._get_client()
         sdr_error = False
+        sdr_sensors: list[dict[str, str]] = []
         try:
-            fan_sensors = await client.get_fan_sensors()
+            sdr_sensors = await client.get_sdr_list()
         except Exception:
-            _LOGGER.exception("Failed to query fan sensors")
-            fan_sensors = []
+            _LOGGER.exception("Failed to query SDR sensors")
             sdr_error = True
+
+        self._sdr_units = {s["name"]: s["unit"] for s in sdr_sensors}
 
         schema_fields: dict[Any, Any] = {}
 
-        if fan_sensors:
-            current_fan_names = [
-                f["name"] for f in self._config_entry.options.get(CONF_FANS, [])
+        if sdr_sensors:
+            current_sensor_names = [
+                s["name"] for s in self._config_entry.options.get(CONF_SENSORS, [])
             ]
-            default_selection = [n for n in current_fan_names if n in fan_sensors]
+            default_selection = [n for n in current_sensor_names if any(s["name"] == n for s in sdr_sensors)]
 
-            fan_options = [
-                SelectOptionDict(value=name, label=name) for name in fan_sensors
+            sensor_options = [
+                SelectOptionDict(value=s["name"], label=f"{s['name']} ({s['unit']})" if s["unit"] else s["name"])
+                for s in sdr_sensors
             ]
             schema_fields[vol.Optional(
-                CONF_SELECTED_FANS, default=default_selection
+                CONF_SELECTED_SENSORS, default=default_selection
             )] = SelectSelector(
                 SelectSelectorConfig(
-                    options=fan_options,
+                    options=sensor_options,
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )
             )
 
-        schema_fields[vol.Optional(CONF_MANUAL_FANS, default="")] = str
+        schema_fields[vol.Optional(CONF_MANUAL_SENSORS, default="")] = str
 
         if sdr_error:
             errors["base"] = "sdr_query_failed"
 
         return self.async_show_form(
-            step_id="fan_select",
+            step_id="sensor_select",
             data_schema=vol.Schema(schema_fields),
             errors=errors,
         )
 
-    async def async_step_fan_thresholds(
+    async def async_step_threshold_sensor_select(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure thresholds for each selected fan."""
+        """Select which sensors to configure threshold overrides for."""
         if user_input is not None:
-            fan_name = self._selected_fans[self._fan_index]
-            fan_entry: dict[str, Any] = {"name": fan_name, "thresholds": {}}
+            selected = user_input.get(CONF_THRESHOLD_SENSORS, [])
+            if selected:
+                self._selected_threshold_sensors = selected
+                self._threshold_index = 0
+                return await self.async_step_sensor_thresholds()
+            return self.async_create_entry(title="", data=self._new_options)
+
+        # Read thresholds from BMC to find which sensors have them
+        client = self._get_client()
+        sensors = self._new_options.get(CONF_SENSORS, [])
+        sensors_with_thresholds: list[str] = []
+        for sensor in sensors:
+            try:
+                thresholds = await client.get_sensor_thresholds(sensor["name"])
+                if thresholds:
+                    sensors_with_thresholds.append(sensor["name"])
+            except Exception:
+                _LOGGER.debug("Could not read thresholds for %s", sensor["name"])
+
+        if not sensors_with_thresholds:
+            return self.async_create_entry(title="", data=self._new_options)
+
+        # Default to currently configured threshold sensors
+        current_threshold_names = [
+            s["name"] for s in self._config_entry.options.get(CONF_SENSORS, [])
+            if s.get("thresholds")
+        ]
+        default_selection = [n for n in current_threshold_names if n in sensors_with_thresholds]
+
+        return self.async_show_form(
+            step_id="threshold_sensor_select",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_THRESHOLD_SENSORS, default=default_selection
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value=name, label=name)
+                                for name in sensors_with_thresholds
+                            ],
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_sensor_thresholds(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure thresholds for each selected sensor."""
+        if user_input is not None:
+            sensor_name = self._selected_threshold_sensors[self._threshold_index]
 
             lower = [
-                user_input.get(CONF_FAN_LNR),
-                user_input.get(CONF_FAN_LC),
-                user_input.get(CONF_FAN_LNC),
+                user_input.get(CONF_THRESH_LNR),
+                user_input.get(CONF_THRESH_LC),
+                user_input.get(CONF_THRESH_LNC),
             ]
             upper = [
-                user_input.get(CONF_FAN_UNC),
-                user_input.get(CONF_FAN_UC),
-                user_input.get(CONF_FAN_UNR),
+                user_input.get(CONF_THRESH_UNC),
+                user_input.get(CONF_THRESH_UC),
+                user_input.get(CONF_THRESH_UNR),
             ]
 
+            thresholds: dict[str, list[int]] = {}
             if any(v is not None for v in lower):
-                fan_entry["thresholds"]["lower"] = [v or 0 for v in lower]
+                thresholds["lower"] = [v or 0 for v in lower]
             if any(v is not None for v in upper):
-                fan_entry["thresholds"]["upper"] = [v or 0 for v in upper]
+                thresholds["upper"] = [v or 0 for v in upper]
 
-            self._new_options.setdefault(CONF_FANS, []).append(fan_entry)
-            self._fan_index += 1
+            # Update the sensor entry in options
+            for sensor in self._new_options.get(CONF_SENSORS, []):
+                if sensor["name"] == sensor_name:
+                    if thresholds:
+                        sensor["thresholds"] = thresholds
+                    elif "thresholds" in sensor:
+                        del sensor["thresholds"]
+                    break
 
-            if self._fan_index < len(self._selected_fans):
-                return await self.async_step_fan_thresholds()
+            self._threshold_index += 1
+
+            if self._threshold_index < len(self._selected_threshold_sensors):
+                return await self.async_step_sensor_thresholds()
 
             return self.async_create_entry(title="", data=self._new_options)
 
-        fan_name = self._selected_fans[self._fan_index]
-        defaults = await self._read_fan_thresholds(fan_name)
+        sensor_name = self._selected_threshold_sensors[self._threshold_index]
+        defaults = await self._read_sensor_thresholds(sensor_name)
 
         return self.async_show_form(
-            step_id="fan_thresholds",
+            step_id="sensor_thresholds",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(CONF_FAN_LNR, default=defaults.get("lnr")): int,
-                    vol.Optional(CONF_FAN_LC, default=defaults.get("lc")): int,
-                    vol.Optional(CONF_FAN_LNC, default=defaults.get("lnc")): int,
-                    vol.Optional(CONF_FAN_UNC, default=defaults.get("unc")): int,
-                    vol.Optional(CONF_FAN_UC, default=defaults.get("uc")): int,
-                    vol.Optional(CONF_FAN_UNR, default=defaults.get("unr")): int,
+                    vol.Optional(CONF_THRESH_LNR, default=defaults.get("lnr")): int,
+                    vol.Optional(CONF_THRESH_LC, default=defaults.get("lc")): int,
+                    vol.Optional(CONF_THRESH_LNC, default=defaults.get("lnc")): int,
+                    vol.Optional(CONF_THRESH_UNC, default=defaults.get("unc")): int,
+                    vol.Optional(CONF_THRESH_UC, default=defaults.get("uc")): int,
+                    vol.Optional(CONF_THRESH_UNR, default=defaults.get("unr")): int,
                 }
             ),
-            description_placeholders={"fan_name": fan_name},
+            description_placeholders={"sensor_name": sensor_name},
         )
 
-    async def _read_fan_thresholds(self, fan_name: str) -> dict[str, int]:
-        """Read current thresholds for a fan from the BMC."""
-        for fan in self._config_entry.options.get(CONF_FANS, []):
-            if fan["name"] == fan_name:
-                thresholds = fan.get("thresholds", {})
+    async def _read_sensor_thresholds(self, sensor_name: str) -> dict[str, int]:
+        """Read current thresholds for a sensor from config or BMC."""
+        # Check existing config first
+        for sensor in self._config_entry.options.get(CONF_SENSORS, []):
+            if sensor["name"] == sensor_name:
+                thresholds = sensor.get("thresholds", {})
                 lower = thresholds.get("lower", [])
                 upper = thresholds.get("upper", [])
                 result: dict[str, int] = {}
@@ -676,11 +774,12 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                 if result:
                     return result
 
+        # Fall back to reading from BMC
         client = self._get_client()
         try:
-            thresholds = await client.get_fan_thresholds(fan_name)
+            thresholds = await client.get_sensor_thresholds(sensor_name)
             if thresholds:
                 return thresholds
         except Exception:
-            _LOGGER.debug("Could not read thresholds for %s", fan_name)
+            _LOGGER.debug("Could not read thresholds for %s", sensor_name)
         return {}
