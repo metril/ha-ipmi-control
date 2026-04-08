@@ -63,7 +63,7 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
 
     _attr_device_class = SwitchDeviceClass.SWITCH
     _attr_has_entity_name = True
-    _attr_name = "Power"
+    _attr_name = "Power On / Shutdown"
     _attr_icon = "mdi:server"
 
     def __init__(
