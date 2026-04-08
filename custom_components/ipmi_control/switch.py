@@ -1,8 +1,9 @@
-"""Switch platform for IPMI Controller."""
+"""Switch platform for IPMI Control."""
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
@@ -16,7 +17,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_HOST_NAME,
     CONF_POWER_CONTROL,
+    CONF_POWER_STATE_HOLD,
     DEFAULT_POWER_CONTROL,
+    DEFAULT_POWER_STATE_HOLD,
     DOMAIN,
     POWER_CONTROL_BOTH,
     POWER_CONTROL_NONE,
@@ -62,6 +65,8 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         super().__init__(coordinator)
         self._client = client
         self._entry = entry
+        self._optimistic_state: bool | None = None
+        self._optimistic_expiry: float = 0
         host_name = entry.data[CONF_HOST_NAME]
         self._attr_unique_id = f"ipmi_{host_name}_power"
         self._attr_device_info = DeviceInfo(
@@ -75,7 +80,19 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         """Return the power state."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.get("power")
+        actual = self.coordinator.data.get("power")
+        if self._optimistic_state is not None:
+            if actual == self._optimistic_state:
+                # BMC caught up, clear override
+                self._optimistic_state = None
+                self._optimistic_expiry = 0
+            elif time.monotonic() < self._optimistic_expiry:
+                return self._optimistic_state
+            else:
+                # Expired without confirmation, clear override
+                self._optimistic_state = None
+                self._optimistic_expiry = 0
+        return actual
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the server."""
@@ -93,6 +110,8 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
 
+        self._set_optimistic(True)
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the server (soft/ACPI shutdown)."""
         power_control = self._entry.options.get(
@@ -108,3 +127,15 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
+
+        self._set_optimistic(False)
+
+    def _set_optimistic(self, state: bool) -> None:
+        """Set optimistic state override with configured hold duration."""
+        hold = self._entry.options.get(
+            CONF_POWER_STATE_HOLD, DEFAULT_POWER_STATE_HOLD
+        )
+        if hold > 0:
+            self._optimistic_state = state
+            self._optimistic_expiry = time.monotonic() + hold
+            self.async_write_ha_state()
