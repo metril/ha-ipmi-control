@@ -98,8 +98,9 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         try:
             sensor_thresholds = await self.client.get_all_sensor_thresholds(sensors)
-            self.data["sensor_thresholds"] = sensor_thresholds
-            self.async_update_listeners()
+            self.async_set_updated_data(
+                {**self.data, "sensor_thresholds": sensor_thresholds}
+            )
         except IpmiAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except IpmiConnectionError as err:
