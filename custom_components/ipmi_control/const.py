@@ -34,15 +34,18 @@ CONF_THRESH_UNC = "thresh_unc"
 CONF_THRESH_UC = "thresh_uc"
 CONF_THRESH_UNR = "thresh_unr"
 
-# Power control policies
-POWER_CONTROL_BOTH = "both"
-POWER_CONTROL_ON = "on"
-POWER_CONTROL_OFF = "off"
-POWER_CONTROL_NONE = "none"
+# Power control actions (stored as list in CONF_POWER_CONTROL)
+POWER_ON = "on"
+POWER_SOFT_OFF = "soft_off"
+POWER_HARD_OFF = "hard_off"
+
+# Hard power off safety gate
+CONF_HARD_OFF_DISARM_TIMEOUT = "hard_off_disarm_timeout"
+DEFAULT_HARD_OFF_DISARM_TIMEOUT = 30
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 10
-DEFAULT_POWER_CONTROL = POWER_CONTROL_BOTH
+DEFAULT_POWER_CONTROL = [POWER_ON, POWER_SOFT_OFF]
 CONF_POWER_STATE_HOLD = "power_state_hold"
 DEFAULT_POWER_STATE_HOLD = 60
 
