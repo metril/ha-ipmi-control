@@ -12,14 +12,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ADDON_URL,
-    CONF_ADMIN_PASS,
-    CONF_ADMIN_USER,
     CONF_FAN_MODE_COMMANDS,
     CONF_FAN_MODE_QUERY_COMMAND,
     CONF_FAN_MODE_RESPONSE_MAPPING,
     CONF_IPMI_IP,
-    CONF_OPERATOR_PASS,
-    CONF_OPERATOR_USER,
+    CONF_PASSWORD,
+    CONF_PRIVILEGE_LEVEL,
+    CONF_USERNAME,
     DOMAIN,
 )
 from .coordinator import IpmiDataUpdateCoordinator
@@ -54,10 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session=session,
         addon_url=entry.data[CONF_ADDON_URL],
         host_ip=entry.data[CONF_IPMI_IP],
-        operator_user=entry.data[CONF_OPERATOR_USER],
-        operator_pass=entry.data[CONF_OPERATOR_PASS],
-        admin_user=entry.data[CONF_ADMIN_USER],
-        admin_pass=entry.data[CONF_ADMIN_PASS],
+        username=entry.data[CONF_USERNAME],
+        password=entry.data[CONF_PASSWORD],
+        privilege_level=entry.data[CONF_PRIVILEGE_LEVEL],
         fan_config=fan_config,
     )
 
