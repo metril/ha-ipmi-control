@@ -10,7 +10,7 @@ from .ipmi import is_auth_error, run_ipmitool
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IPMI Control", version="1.0.0")
+app = FastAPI(title="IPMI Control", version="2.0.0")
 
 
 # --- Request models ---
@@ -45,10 +45,6 @@ class SensorThresholdsSetRequest(IpmiCredentials):
     upper: list[int] | None = None  # [UNC, UC, UNR]
 
 
-class SdrFansRequest(IpmiCredentials):
-    pass
-
-
 # --- Helper ---
 
 
@@ -59,6 +55,35 @@ def _check_error(stderr: str, returncode: int) -> None:
     if is_auth_error(stderr):
         raise HTTPException(status_code=401, detail=f"Authentication failed: {stderr}")
     raise HTTPException(status_code=500, detail=f"ipmitool error: {stderr}")
+
+
+def _parse_sdr_line(line: str) -> dict | None:
+    """Parse a single SDR elist full output line.
+
+    Format: "CPU Temp         | 01h | ok  |  3.1 | 42 degrees C"
+    Returns: {"name": "CPU Temp", "value": 42.0, "unit": "degrees C", "status": "ok"}
+    """
+    line = line.strip()
+    if not line:
+        return None
+    parts = line.split("|")
+    if len(parts) < 5:
+        return None
+    name = parts[0].strip()
+    if not name:
+        return None
+    status = parts[2].strip()
+    reading = parts[4].strip()
+
+    value = None
+    unit = ""
+    if status == "ok" or status == "cr":
+        match = re.match(r"([\d.]+)\s+(.*)", reading)
+        if match:
+            value = float(match.group(1))
+            unit = match.group(2).strip()
+
+    return {"name": name, "value": value, "unit": unit, "status": status}
 
 
 # --- Endpoints ---
@@ -87,6 +112,17 @@ async def chassis_status(req: ChassisStatusRequest):
         raise HTTPException(status_code=500, detail=f"Could not parse chassis status: {stdout}")
 
     return {"power": power}
+
+
+@app.post("/api/chassis/status/admin")
+async def chassis_status_admin(req: ChassisStatusRequest):
+    """Verify credentials have Administrator privilege."""
+    stdout, stderr, rc = await run_ipmitool(
+        req.host, req.user, req.password, "ADMINISTRATOR",
+        "chassis", "status",
+    )
+    _check_error(stderr, rc)
+    return {"ok": True}
 
 
 @app.post("/api/chassis/power")
@@ -168,52 +204,41 @@ async def sensor_thresholds_set(req: SensorThresholdsSetRequest):
     return {"ok": True, "set": results}
 
 
-@app.post("/api/sdr/fans")
-async def sdr_fans(req: SdrFansRequest):
+@app.post("/api/sdr/list")
+async def sdr_list(req: IpmiCredentials):
+    """Return all SDR sensor names and units for discovery."""
     stdout, stderr, rc = await run_ipmitool(
         req.host, req.user, req.password, "OPERATOR",
-        "sdr", "type", "Fan",
+        "sdr", "elist", "full",
     )
     _check_error(stderr, rc)
 
-    fans = []
+    sensors = []
     for line in stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        # Format: "FAN 1            | 30h | ok  |  7.1 | 3400 RPM"
-        parts = line.split("|")
-        if parts:
-            fan_name = parts[0].strip()
-            if fan_name:
-                fans.append(fan_name)
+        parsed = _parse_sdr_line(line)
+        if parsed:
+            sensors.append({"name": parsed["name"], "unit": parsed["unit"]})
 
-    return {"fans": fans}
+    return {"sensors": sensors}
 
 
-@app.post("/api/sdr/fan-readings")
-async def sdr_fan_readings(req: SdrFansRequest):
-    """Return fan names with their current RPM readings."""
+@app.post("/api/sdr/readings")
+async def sdr_readings(req: IpmiCredentials):
+    """Return current readings for all SDR sensors."""
     stdout, stderr, rc = await run_ipmitool(
         req.host, req.user, req.password, "OPERATOR",
-        "sdr", "type", "Fan",
+        "sdr", "elist", "full",
     )
     _check_error(stderr, rc)
 
-    fans: dict[str, int | None] = {}
+    sensors = {}
     for line in stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        # Format: "FAN 1            | 30h | ok  |  7.1 | 3400 RPM"
-        parts = line.split("|")
-        if len(parts) < 5:
-            continue
-        fan_name = parts[0].strip()
-        if not fan_name:
-            continue
-        reading = parts[4].strip()
-        rpm_match = re.search(r"(\d+)\s*RPM", reading)
-        fans[fan_name] = int(rpm_match.group(1)) if rpm_match else None
+        parsed = _parse_sdr_line(line)
+        if parsed:
+            sensors[parsed["name"]] = {
+                "value": parsed["value"],
+                "unit": parsed["unit"],
+                "status": parsed["status"],
+            }
 
-    return {"fans": fans}
+    return {"sensors": sensors}
