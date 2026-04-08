@@ -17,6 +17,7 @@ from .const import (
     CONF_FAN_MODE_DISPLAY_MAPPING,
     CONF_FAN_MODES,
     CONF_HOST_NAME,
+    CONF_PRIVILEGE_LEVEL,
     CONF_VIRTUAL_MODE_MAPPING,
     DOMAIN,
 )
@@ -32,6 +33,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up IPMI fan mode select from a config entry."""
+    privilege = entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR")
+    if privilege != "ADMINISTRATOR":
+        return
+
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
     client: IpmiClient = data["client"]
