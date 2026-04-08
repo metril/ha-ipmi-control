@@ -138,7 +138,7 @@ class IpmiForceHardOffButton(ButtonEntity):
     """Button to force hard power off (requires arming first)."""
 
     _attr_has_entity_name = True
-    _attr_name = "Force Power Off"
+    _attr_name = "Power Off (Force)"
     _attr_icon = "mdi:power-off"
 
     def __init__(
