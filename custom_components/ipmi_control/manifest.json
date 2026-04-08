@@ -1,11 +1,11 @@
 {
-  "domain": "ipmi_controller",
-  "name": "IPMI Controller",
+  "domain": "ipmi_control",
+  "name": "IPMI Control",
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
   "documentation": "",
   "iot_class": "local_polling",
   "requirements": [],
-  "version": "3.0.0"
+  "version": "3.1.0"
 }
