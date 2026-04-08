@@ -67,7 +67,6 @@
         "description": "Update the connection details for this IPMI host.",
         "data": {
           "addon_url": "IPMI Add-on URL",
-          "host": "Host name",
           "ip": "BMC IP address",
           "username": "Username",
           "password": "Password",

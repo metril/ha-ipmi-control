@@ -184,12 +184,8 @@ class IpmiClient:
                 result[sensor_name] = thresholds
         return result
 
-    async def set_sensor_thresholds(self, sensors: list[dict]) -> bool:
+    async def set_sensor_thresholds(self, sensors: list[dict]) -> None:
         """Set sensor thresholds for sensors with configured overrides."""
-        if not sensors:
-            return True
-
-        success = True
         for sensor in sensors:
             sensor_name = sensor["name"]
             thresholds = sensor.get("thresholds", {})
@@ -207,13 +203,7 @@ class IpmiClient:
             if upper:
                 body["upper"] = upper
 
-            try:
-                await self._request("POST", "/api/sensor/thresholds/set", body)
-            except Exception as err:
-                _LOGGER.error("Failed to set thresholds for %s: %s", sensor_name, err)
-                success = False
-
-        return success
+            await self._request("POST", "/api/sensor/thresholds/set", body)
 
     # --- Static test methods ---
 

@@ -88,6 +88,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._options: dict[str, Any] = {}
         self._addon_url: str = DEFAULT_ADDON_URL
         self._client: IpmiClient | None = None
+        self._sdr_units: dict[str, str] = {}
 
     def _get_client(self) -> IpmiClient:
         """Get or create an IpmiClient from collected data."""
@@ -436,6 +437,8 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     pass
 
             if not errors:
+                # Preserve host name from original entry (identity, not reconfigurable)
+                user_input[CONF_HOST_NAME] = reconfigure_entry.data[CONF_HOST_NAME]
                 return self.async_update_reload_and_abort(
                     reconfigure_entry, data=user_input
                 )
@@ -447,10 +450,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_ADDON_URL,
                         default=reconfigure_entry.data.get(CONF_ADDON_URL, DEFAULT_ADDON_URL),
-                    ): str,
-                    vol.Required(
-                        CONF_HOST_NAME,
-                        default=reconfigure_entry.data[CONF_HOST_NAME],
                     ): str,
                     vol.Required(
                         CONF_IPMI_IP,
