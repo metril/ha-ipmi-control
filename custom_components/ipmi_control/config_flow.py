@@ -52,6 +52,8 @@ from .const import (
     DEFAULT_POWER_CONTROL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    CONF_POWER_STATE_HOLD,
+    DEFAULT_POWER_STATE_HOLD,
     MOTHERBOARD_NONE,
     MOTHERBOARD_PROFILES,
     POWER_CONTROL_BOTH,
@@ -230,6 +232,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._options[CONF_POWER_CONTROL] = user_input[CONF_POWER_CONTROL]
             self._options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
+            self._options[CONF_POWER_STATE_HOLD] = user_input[CONF_POWER_STATE_HOLD]
             return await self.async_step_fan_profile()
 
         return self.async_show_form(
@@ -242,6 +245,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_POWER_STATE_HOLD, default=DEFAULT_POWER_STATE_HOLD
+                    ): vol.All(int, vol.Range(min=0, max=300)),
                 }
             ),
         )
@@ -582,6 +588,10 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                         CONF_SCAN_INTERVAL,
                         default=current_opts.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_POWER_STATE_HOLD,
+                        default=current_opts.get(CONF_POWER_STATE_HOLD, DEFAULT_POWER_STATE_HOLD),
+                    ): vol.All(int, vol.Range(min=0, max=300)),
                     vol.Required(
                         CONF_MOTHERBOARD,
                         default=current_opts.get(CONF_MOTHERBOARD, MOTHERBOARD_NONE),

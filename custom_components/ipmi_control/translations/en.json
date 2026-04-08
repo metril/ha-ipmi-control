@@ -23,11 +23,13 @@
         "description": "Configure power control policy and polling interval.",
         "data": {
           "power_control": "Power control policy",
-          "scan_interval": "Poll interval (seconds)"
+          "scan_interval": "Poll interval (seconds)",
+          "power_state_hold": "Grace period after power commands (seconds)"
         },
         "data_description": {
           "power_control": "Which power operations are allowed (both, on, off, none)",
-          "scan_interval": "How often to poll the BMC for state changes (5-300 seconds)"
+          "scan_interval": "How often to poll the BMC for state changes (5-300 seconds)",
+          "power_state_hold": "How long to hold the expected state after a power command (0 to disable)"
         }
       },
       "fan_profile": {
@@ -87,11 +89,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "IPMI Controller Options",
+        "title": "IPMI Control Options",
         "description": "Adjust power control, polling, and fan profile settings.",
         "data": {
           "power_control": "Power control policy",
           "scan_interval": "Poll interval (seconds)",
+          "power_state_hold": "Grace period after power commands (seconds)",
           "motherboard": "Motherboard profile"
         }
       },
