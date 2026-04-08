@@ -23,16 +23,31 @@ async def register_discovery():
         logger.debug("No SUPERVISOR_TOKEN, skipping discovery registration")
         return
 
-    hostname = os.environ.get("HOSTNAME", "")
-    if not hostname:
-        logger.warning("No HOSTNAME env var, cannot register discovery")
-        return
+    headers = {"Authorization": f"Bearer {token}"}
 
     try:
         async with httpx.AsyncClient() as client:
+            # Query our own add-on info to get the slug
+            info_resp = await client.get(
+                "http://supervisor/addons/self/info",
+                headers=headers,
+                timeout=10,
+            )
+            if info_resp.status_code != 200:
+                logger.warning("Could not query add-on info: %s", info_resp.text)
+                return
+
+            slug = info_resp.json().get("data", {}).get("slug", "")
+            if not slug:
+                logger.warning("Add-on info returned no slug")
+                return
+
+            # Hostname is the slug with underscores replaced by hyphens
+            hostname = slug.replace("_", "-")
+
             resp = await client.post(
                 "http://supervisor/discovery",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
                 json={
                     "service": "ipmi_control",
                     "config": {
@@ -42,7 +57,7 @@ async def register_discovery():
                 },
                 timeout=10,
             )
-            if resp.status_code == 200:
+            if resp.status_code in (200, 201):
                 logger.info("Registered with Supervisor discovery as %s:8099", hostname)
             else:
                 logger.warning("Discovery registration returned %s: %s", resp.status_code, resp.text)
