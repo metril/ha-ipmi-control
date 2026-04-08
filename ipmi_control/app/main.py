@@ -49,7 +49,7 @@ async def register_discovery():
                 "http://supervisor/discovery",
                 headers=headers,
                 json={
-                    "service": "ipmi_control",
+                    "service": "ipmi_controller",
                     "config": {
                         "host": hostname,
                         "port": 8099,
