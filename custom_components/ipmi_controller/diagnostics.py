@@ -8,10 +8,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_ADMIN_PASS,
-    CONF_ADMIN_USER,
-    CONF_OPERATOR_PASS,
-    CONF_OPERATOR_USER,
+    CONF_PASSWORD,
+    CONF_USERNAME,
     DOMAIN,
 )
 
@@ -24,7 +22,7 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     data = dict(entry.data)
     # Redact credentials
-    for key in (CONF_OPERATOR_USER, CONF_OPERATOR_PASS, CONF_ADMIN_USER, CONF_ADMIN_PASS):
+    for key in (CONF_USERNAME, CONF_PASSWORD):
         if key in data:
             data[key] = REDACTED
 
