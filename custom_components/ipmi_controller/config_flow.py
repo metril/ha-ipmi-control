@@ -104,20 +104,29 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         return self._client
 
+    async def _detect_addon_url(self) -> bool:
+        """Auto-detect the add-on URL via Supervisor. Returns True if found."""
+        if self._addon_url != DEFAULT_ADDON_URL:
+            return True  # Already detected (e.g., via hassio discovery)
+        # Try the default URL — it may work for local add-ons
+        session = async_get_clientsession(self.hass)
+        try:
+            await IpmiClient.test_addon_connection(session, self._addon_url)
+            return True
+        except IpmiConnectionError:
+            return False
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 1: Add-on URL and IPMI connection credentials."""
+        """Step 1: IPMI connection credentials."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._addon_url = user_input.pop(CONF_ADDON_URL)
             session = async_get_clientsession(self.hass)
 
             # Verify add-on is reachable
-            try:
-                await IpmiClient.test_addon_connection(session, self._addon_url)
-            except IpmiConnectionError:
+            if not await self._detect_addon_url():
                 errors["base"] = "addon_not_reachable"
             else:
                 # Verify IPMI connection
@@ -162,7 +171,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_ADDON_URL, default=DEFAULT_ADDON_URL): str,
                     vol.Required(CONF_HOST_NAME): str,
                     vol.Required(CONF_IPMI_IP): str,
                     vol.Required(CONF_USERNAME, default="Administrator"): str,
@@ -408,11 +416,12 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         reconfigure_entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            addon_url = reconfigure_entry.data[CONF_ADDON_URL]
             session = async_get_clientsession(self.hass)
             try:
                 await IpmiClient.test_ipmi_connection(
                     session,
-                    user_input.get(CONF_ADDON_URL, reconfigure_entry.data[CONF_ADDON_URL]),
+                    addon_url,
                     user_input[CONF_IPMI_IP],
                     user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD],
@@ -426,7 +435,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 try:
                     await IpmiClient.test_admin_privilege(
                         session,
-                        user_input.get(CONF_ADDON_URL, reconfigure_entry.data[CONF_ADDON_URL]),
+                        addon_url,
                         user_input[CONF_IPMI_IP],
                         user_input[CONF_USERNAME],
                         user_input[CONF_PASSWORD],
@@ -437,8 +446,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     pass
 
             if not errors:
-                # Preserve host name from original entry (identity, not reconfigurable)
+                # Preserve host name and addon URL from original entry
                 user_input[CONF_HOST_NAME] = reconfigure_entry.data[CONF_HOST_NAME]
+                user_input[CONF_ADDON_URL] = addon_url
                 return self.async_update_reload_and_abort(
                     reconfigure_entry, data=user_input
                 )
@@ -447,10 +457,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_ADDON_URL,
-                        default=reconfigure_entry.data.get(CONF_ADDON_URL, DEFAULT_ADDON_URL),
-                    ): str,
                     vol.Required(
                         CONF_IPMI_IP,
                         default=reconfigure_entry.data[CONF_IPMI_IP],
