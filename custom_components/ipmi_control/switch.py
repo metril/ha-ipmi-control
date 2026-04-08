@@ -47,6 +47,7 @@ async def async_setup_entry(
 class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity):
     """Switch to control IPMI host power."""
 
+    _attr_assumed_state = True
     _attr_device_class = SwitchDeviceClass.SWITCH
     _attr_has_entity_name = True
     _attr_name = "Power"
@@ -93,8 +94,6 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
 
-        await self.coordinator.async_request_refresh()
-
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the server (soft/ACPI shutdown)."""
         power_control = self._entry.options.get(
@@ -110,5 +109,3 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
-
-        await self.coordinator.async_request_refresh()
