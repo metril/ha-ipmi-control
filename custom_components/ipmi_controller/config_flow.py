@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
+import aiohttp
 import voluptuous as vol
 
 from homeassistant.config_entries import (
@@ -105,11 +107,34 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         return self._client
 
     async def _detect_addon_url(self) -> bool:
-        """Auto-detect the add-on URL via Supervisor. Returns True if found."""
+        """Auto-detect the add-on URL via Supervisor discovery API."""
         if self._addon_url != DEFAULT_ADDON_URL:
             return True  # Already detected (e.g., via hassio discovery)
-        # Try the default URL — it may work for local add-ons
+
+        # Query the Supervisor discovery API to find our add-on
         session = async_get_clientsession(self.hass)
+        supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
+        if supervisor_token:
+            try:
+                async with session.get(
+                    "http://supervisor/discovery",
+                    headers={"Authorization": f"Bearer {supervisor_token}"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for entry in data.get("data", {}).get("discovery", []):
+                            if entry.get("service") == DOMAIN:
+                                config = entry.get("config", {})
+                                host = config.get("host")
+                                port = config.get("port", 8099)
+                                if host:
+                                    self._addon_url = f"http://{host}:{port}"
+                                    return True
+            except Exception:
+                _LOGGER.debug("Failed to query Supervisor discovery API")
+
+        # Fall back to testing the default URL (works for local add-ons)
         try:
             await IpmiClient.test_addon_connection(session, self._addon_url)
             return True
