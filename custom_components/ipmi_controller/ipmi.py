@@ -26,34 +26,31 @@ class IpmiClient:
         session: aiohttp.ClientSession,
         addon_url: str,
         host_ip: str,
-        operator_user: str,
-        operator_pass: str,
-        admin_user: str,
-        admin_pass: str,
+        username: str,
+        password: str,
+        privilege_level: str = "ADMINISTRATOR",
         fan_config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the IPMI client."""
         self._session = session
         self._addon_url = addon_url.rstrip("/")
         self._host_ip = host_ip
-        self._operator_creds = (operator_user, operator_pass)
-        self._admin_creds = (admin_user, admin_pass)
+        self._username = username
+        self._password = password
+        self._privilege_level = privilege_level
         self._fan_config = fan_config or {}
 
-    def _operator_body(self) -> dict[str, str]:
-        """Build request body with operator credentials."""
-        return {
-            "host": self._host_ip,
-            "user": self._operator_creds[0],
-            "password": self._operator_creds[1],
-        }
+    @property
+    def is_admin(self) -> bool:
+        """Return True if configured with Administrator privilege."""
+        return self._privilege_level == "ADMINISTRATOR"
 
-    def _admin_body(self) -> dict[str, str]:
-        """Build request body with administrator credentials."""
+    def _auth_body(self) -> dict[str, str]:
+        """Build request body with credentials."""
         return {
             "host": self._host_ip,
-            "user": self._admin_creds[0],
-            "password": self._admin_creds[1],
+            "user": self._username,
+            "password": self._password,
         }
 
     async def _request(
@@ -90,17 +87,17 @@ class IpmiClient:
 
     async def get_chassis_status(self) -> bool:
         """Get chassis power status."""
-        result = await self._request("POST", "/api/chassis/status", self._operator_body())
+        result = await self._request("POST", "/api/chassis/status", self._auth_body())
         return result["power"]
 
     async def power_on(self) -> None:
         """Send power on command."""
-        body = {**self._operator_body(), "action": "on"}
+        body = {**self._auth_body(), "action": "on"}
         await self._request("POST", "/api/chassis/power", body)
 
     async def power_off(self) -> None:
         """Send soft power off command."""
-        body = {**self._operator_body(), "action": "soft"}
+        body = {**self._auth_body(), "action": "soft"}
         await self._request("POST", "/api/chassis/power", body)
 
     async def get_fan_mode(self) -> str | None:
@@ -111,21 +108,19 @@ class IpmiClient:
 
         response_mapping = self._fan_config.get("fan_mode_response_mapping", {})
 
-        # Build the raw command string from the structured config
         netfn = query_cmd["netfn"]
         command = query_cmd["command"]
         data = query_cmd.get("data", [])
         raw_str = "raw " + " ".join(f"0x{b:02x}" for b in [netfn, command] + data)
 
         body = {
-            **self._admin_body(),
+            **self._auth_body(),
             "privilege": "ADMINISTRATOR",
             "command": raw_str,
         }
         result = await self._request("POST", "/api/raw", body)
         output = result.get("output", "").strip()
 
-        # Match response byte to mode name
         for response_key, mode_name in response_mapping.items():
             key = int(response_key) if isinstance(response_key, str) else response_key
             response_hex = f"{key:02x}"
@@ -149,59 +144,61 @@ class IpmiClient:
             raw_str = "raw " + " ".join(f"0x{b:02x}" for b in [netfn, command] + data)
 
             body = {
-                **self._admin_body(),
+                **self._auth_body(),
                 "privilege": "ADMINISTRATOR",
                 "command": raw_str,
             }
             await self._request("POST", "/api/raw", body)
 
-    async def get_fan_readings(self) -> dict[str, int | None]:
-        """Get current RPM readings for all fans from SDR."""
-        result = await self._request(
-            "POST", "/api/sdr/fan-readings", self._operator_body()
-        )
-        return result.get("fans", {})
+    # --- SDR sensor methods ---
 
-    async def get_fan_sensors(self) -> list[str]:
-        """Query SDR for fan sensor names."""
-        result = await self._request("POST", "/api/sdr/fans", self._operator_body())
-        return result.get("fans", [])
+    async def get_sdr_list(self) -> list[dict[str, str]]:
+        """Get list of all SDR sensors (name + unit) for discovery."""
+        result = await self._request("POST", "/api/sdr/list", self._auth_body())
+        return result.get("sensors", [])
 
-    async def get_fan_thresholds(self, sensor_name: str) -> dict[str, int] | None:
+    async def get_sdr_readings(self) -> dict[str, dict]:
+        """Get current readings for all SDR sensors."""
+        result = await self._request("POST", "/api/sdr/readings", self._auth_body())
+        return result.get("sensors", {})
+
+    # --- Threshold methods ---
+
+    async def get_sensor_thresholds(self, sensor_name: str) -> dict[str, int] | None:
         """Read current threshold values for a sensor."""
-        body = {**self._operator_body(), "sensor_name": sensor_name}
+        body = {**self._auth_body(), "sensor_name": sensor_name}
         result = await self._request("POST", "/api/sensor/thresholds/get", body)
         if result:
             return result
         return None
 
-    async def get_all_fan_thresholds(
-        self, fans: list[dict]
+    async def get_all_sensor_thresholds(
+        self, sensors: list[dict]
     ) -> dict[str, dict[str, int]]:
-        """Read current thresholds for all configured fans."""
+        """Read current thresholds for all configured sensors."""
         result: dict[str, dict[str, int]] = {}
-        for fan in fans:
-            fan_name = fan["name"]
-            thresholds = await self.get_fan_thresholds(fan_name)
+        for sensor in sensors:
+            sensor_name = sensor["name"]
+            thresholds = await self.get_sensor_thresholds(sensor_name)
             if thresholds:
-                result[fan_name] = thresholds
+                result[sensor_name] = thresholds
         return result
 
-    async def set_fan_thresholds(self, fans: list[dict]) -> bool:
-        """Set fan sensor thresholds for all configured fans."""
-        if not fans:
+    async def set_sensor_thresholds(self, sensors: list[dict]) -> bool:
+        """Set sensor thresholds for sensors with configured overrides."""
+        if not sensors:
             return True
 
         success = True
-        for fan in fans:
-            fan_name = fan["name"]
-            thresholds = fan.get("thresholds", {})
+        for sensor in sensors:
+            sensor_name = sensor["name"]
+            thresholds = sensor.get("thresholds", {})
             if not thresholds:
                 continue
 
             body: dict[str, Any] = {
-                **self._admin_body(),
-                "sensor_name": fan_name,
+                **self._auth_body(),
+                "sensor_name": sensor_name,
             }
             lower = thresholds.get("lower")
             upper = thresholds.get("upper")
@@ -213,10 +210,12 @@ class IpmiClient:
             try:
                 await self._request("POST", "/api/sensor/thresholds/set", body)
             except Exception as err:
-                _LOGGER.error("Failed to set thresholds for %s: %s", fan_name, err)
+                _LOGGER.error("Failed to set thresholds for %s: %s", sensor_name, err)
                 success = False
 
         return success
+
+    # --- Static test methods ---
 
     @staticmethod
     async def test_addon_connection(
@@ -255,3 +254,26 @@ class IpmiClient:
                     raise IpmiConnectionError(detail)
         except aiohttp.ClientError as err:
             raise IpmiConnectionError(f"Connection test failed: {err}") from err
+
+    @staticmethod
+    async def test_admin_privilege(
+        session: aiohttp.ClientSession,
+        addon_url: str,
+        host_ip: str,
+        user: str,
+        password: str,
+    ) -> None:
+        """Test that credentials have Administrator privilege. Raises on failure."""
+        url = f"{addon_url.rstrip('/')}/api/chassis/status/admin"
+        body = {"host": host_ip, "user": user, "password": password}
+        try:
+            async with session.post(
+                url, json=body, timeout=aiohttp.ClientTimeout(total=20)
+            ) as resp:
+                if resp.status == 401:
+                    raise IpmiAuthError("Insufficient privilege level")
+                if resp.status != 200:
+                    detail = (await resp.json()).get("detail", f"HTTP {resp.status}")
+                    raise IpmiConnectionError(detail)
+        except aiohttp.ClientError as err:
+            raise IpmiConnectionError(f"Admin privilege test failed: {err}") from err
