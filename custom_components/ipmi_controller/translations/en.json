@@ -3,9 +3,8 @@
     "step": {
       "user": {
         "title": "IPMI Connection",
-        "description": "Enter the IPMI add-on URL and connection details for your IPMI host.",
+        "description": "Enter the connection details for your IPMI host.",
         "data": {
-          "addon_url": "IPMI Add-on URL",
           "host": "Host name",
           "ip": "BMC IP address",
           "username": "Username",
@@ -13,7 +12,6 @@
           "privilege_level": "Privilege level"
         },
         "data_description": {
-          "addon_url": "URL of the IPMI Control add-on (auto-detected if using Supervisor)",
           "host": "A short name for this host (e.g., menoetius)",
           "ip": "The IP address of the BMC/IPMI interface",
           "username": "IPMI username for BMC access",
@@ -66,7 +64,6 @@
         "title": "Reconfigure IPMI Host",
         "description": "Update the connection details for this IPMI host.",
         "data": {
-          "addon_url": "IPMI Add-on URL",
           "ip": "BMC IP address",
           "username": "Username",
           "password": "Password",
