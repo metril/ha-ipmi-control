@@ -8,17 +8,16 @@
           "addon_url": "IPMI Add-on URL",
           "host": "Host name",
           "ip": "BMC IP address",
-          "operator_username": "Operator username",
-          "operator_password": "Operator password",
-          "admin_username": "Administrator username",
-          "admin_password": "Administrator password"
+          "username": "Username",
+          "password": "Password",
+          "privilege_level": "Privilege level"
         },
         "data_description": {
           "addon_url": "URL of the IPMI Control add-on (auto-detected if using Supervisor)",
           "host": "A short name for this host (e.g., menoetius)",
           "ip": "The IP address of the BMC/IPMI interface",
-          "operator_username": "Used for chassis power operations",
-          "admin_username": "Used for fan control and threshold operations"
+          "username": "IPMI username for BMC access",
+          "privilege_level": "Administrator enables fan mode and threshold control. Operator is read-only."
         }
       },
       "power": {
@@ -43,37 +42,24 @@
           "motherboard": "Select 'none' to skip fan control, or a profile to enable fan mode management"
         }
       },
-      "fan_select": {
-        "title": "Fan Sensors",
-        "description": "Select fan sensors to manage thresholds for, or enter names manually. Leave both empty to skip.",
+      "sensor_select": {
+        "title": "Sensor Selection",
+        "description": "Select BMC sensors to expose in Home Assistant, or enter names manually. Leave both empty to skip.",
         "data": {
-          "selected_fans": "Discovered fan sensors",
-          "manual_fans": "Manual fan names (comma-separated)"
+          "selected_sensors": "Discovered sensors",
+          "manual_sensors": "Manual sensor names (comma-separated)"
         },
         "data_description": {
-          "manual_fans": "Enter fan sensor names manually if SDR discovery failed or is incomplete (e.g., FAN 1, FAN 2, FAN A)"
-        }
-      },
-      "fan_thresholds": {
-        "title": "Thresholds for {fan_name}",
-        "description": "Set the threshold values for {fan_name}. Values are pre-filled from the BMC.",
-        "data": {
-          "fan_lnr": "Lower Non-Recoverable (LNR)",
-          "fan_lc": "Lower Critical (LC)",
-          "fan_lnc": "Lower Non-Critical (LNC)",
-          "fan_unc": "Upper Non-Critical (UNC)",
-          "fan_uc": "Upper Critical (UC)",
-          "fan_unr": "Upper Non-Recoverable (UNR)"
+          "manual_sensors": "Enter sensor names manually if SDR discovery failed or is incomplete"
         }
       },
       "reauth_confirm": {
         "title": "Re-authenticate IPMI",
         "description": "The IPMI credentials are no longer valid. Please enter updated credentials.",
         "data": {
-          "operator_username": "Operator username",
-          "operator_password": "Operator password",
-          "admin_username": "Administrator username",
-          "admin_password": "Administrator password"
+          "username": "Username",
+          "password": "Password",
+          "privilege_level": "Privilege level"
         }
       },
       "reconfigure": {
@@ -83,10 +69,9 @@
           "addon_url": "IPMI Add-on URL",
           "host": "Host name",
           "ip": "BMC IP address",
-          "operator_username": "Operator username",
-          "operator_password": "Operator password",
-          "admin_username": "Administrator username",
-          "admin_password": "Administrator password"
+          "username": "Username",
+          "password": "Password",
+          "privilege_level": "Privilege level"
         }
       }
     },
@@ -94,7 +79,8 @@
       "addon_not_reachable": "Cannot reach the IPMI Control add-on. Make sure it is installed and running.",
       "cannot_connect": "Failed to connect to IPMI host",
       "invalid_auth": "Invalid IPMI credentials",
-      "sdr_query_failed": "Failed to query fan sensors from BMC. You can enter fan names manually below.",
+      "insufficient_privilege": "Credentials do not have Administrator access. Select Operator privilege level or use an Administrator account.",
+      "sdr_query_failed": "Failed to query sensors from BMC. You can enter sensor names manually below.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
@@ -113,27 +99,34 @@
           "motherboard": "Motherboard profile"
         }
       },
-      "fan_select": {
-        "title": "Fan Sensors",
-        "description": "Select fan sensors to manage thresholds for, or enter names manually. Leave both empty to skip.",
+      "sensor_select": {
+        "title": "Sensor Selection",
+        "description": "Select BMC sensors to expose in Home Assistant, or enter names manually. Leave both empty to skip.",
         "data": {
-          "selected_fans": "Discovered fan sensors",
-          "manual_fans": "Manual fan names (comma-separated)"
+          "selected_sensors": "Discovered sensors",
+          "manual_sensors": "Manual sensor names (comma-separated)"
         },
         "data_description": {
-          "manual_fans": "Enter fan sensor names manually if SDR discovery failed or is incomplete (e.g., FAN 1, FAN 2, FAN A)"
+          "manual_sensors": "Enter sensor names manually if SDR discovery failed or is incomplete"
         }
       },
-      "fan_thresholds": {
-        "title": "Thresholds for {fan_name}",
-        "description": "Set the threshold values for {fan_name}.",
+      "threshold_sensor_select": {
+        "title": "Threshold Configuration",
+        "description": "Select sensors to configure threshold overrides for. Only sensors that report thresholds are shown.",
         "data": {
-          "fan_lnr": "Lower Non-Recoverable (LNR)",
-          "fan_lc": "Lower Critical (LC)",
-          "fan_lnc": "Lower Non-Critical (LNC)",
-          "fan_unc": "Upper Non-Critical (UNC)",
-          "fan_uc": "Upper Critical (UC)",
-          "fan_unr": "Upper Non-Recoverable (UNR)"
+          "threshold_sensors": "Sensors to configure"
+        }
+      },
+      "sensor_thresholds": {
+        "title": "Thresholds for {sensor_name}",
+        "description": "Set the threshold values for {sensor_name}. Values are pre-filled from the BMC.",
+        "data": {
+          "thresh_lnr": "Lower Non-Recoverable (LNR)",
+          "thresh_lc": "Lower Critical (LC)",
+          "thresh_lnc": "Lower Non-Critical (LNC)",
+          "thresh_unc": "Upper Non-Critical (UNC)",
+          "thresh_uc": "Upper Critical (UC)",
+          "thresh_unr": "Upper Non-Recoverable (UNR)"
         }
       }
     }
