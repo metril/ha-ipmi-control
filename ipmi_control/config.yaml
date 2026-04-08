@@ -1,5 +1,5 @@
 name: "IPMI Control"
-version: "2.0.2"
+version: "2.0.3"
 slug: "ipmi_control"
 image: ghcr.io/metril/ha-ipmi-control-{arch}
 description: "IPMI/BMC management proxy for Home Assistant"
@@ -12,7 +12,7 @@ startup: application
 boot: auto
 host_network: false
 discovery:
-  - ipmi_control
+  - ipmi_controller
 options:
   max_concurrent: 8
 schema:
