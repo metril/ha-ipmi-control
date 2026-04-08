@@ -22,14 +22,16 @@
         "title": "Power Control",
         "description": "Configure power control policy and polling interval.",
         "data": {
-          "power_control": "Power control policy",
+          "power_control": "Allowed power operations",
           "scan_interval": "Poll interval (seconds)",
-          "power_state_hold": "Grace period after power commands (seconds)"
+          "power_state_hold": "Grace period after power commands (seconds)",
+          "hard_off_disarm_timeout": "Hard power off auto-disarm timeout (seconds)"
         },
         "data_description": {
-          "power_control": "Which power operations are allowed (both, on, off, none)",
+          "power_control": "Select which power operations are allowed for this host",
           "scan_interval": "How often to poll the BMC for state changes (5-300 seconds)",
-          "power_state_hold": "How long to hold the expected state after a power command (0 to disable)"
+          "power_state_hold": "How long to hold the expected state after a power command (0 to disable)",
+          "hard_off_disarm_timeout": "How long the hard power off stays armed before auto-disarming (5-300 seconds)"
         }
       },
       "fan_profile": {
@@ -92,10 +94,15 @@
         "title": "IPMI Control Options",
         "description": "Adjust power control, polling, and fan profile settings.",
         "data": {
-          "power_control": "Power control policy",
+          "power_control": "Allowed power operations",
           "scan_interval": "Poll interval (seconds)",
           "power_state_hold": "Grace period after power commands (seconds)",
+          "hard_off_disarm_timeout": "Hard power off auto-disarm timeout (seconds)",
           "motherboard": "Motherboard profile"
+        },
+        "data_description": {
+          "power_control": "Select which power operations are allowed for this host",
+          "hard_off_disarm_timeout": "How long the hard power off stays armed before auto-disarming (5-300 seconds)"
         }
       },
       "sensor_select": {

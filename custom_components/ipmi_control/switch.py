@@ -8,23 +8,25 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_HARD_OFF_DISARM_TIMEOUT,
     CONF_HOST_NAME,
     CONF_POWER_CONTROL,
     CONF_POWER_STATE_HOLD,
+    DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_POWER_STATE_HOLD,
     DOMAIN,
-    POWER_CONTROL_BOTH,
-    POWER_CONTROL_NONE,
-    POWER_CONTROL_OFF,
-    POWER_CONTROL_ON,
+    POWER_HARD_OFF,
+    POWER_ON,
+    POWER_SOFT_OFF,
 )
 from .coordinator import IpmiDataUpdateCoordinator
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
@@ -42,9 +44,18 @@ async def async_setup_entry(
     coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
     client: IpmiClient = data["client"]
 
-    power_control = entry.options.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
-    if power_control != POWER_CONTROL_NONE:
-        async_add_entities([IpmiPowerSwitch(coordinator, entry, client)])
+    policy: list[str] = entry.options.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
+
+    entities: list[SwitchEntity] = []
+
+    if POWER_ON in policy or POWER_SOFT_OFF in policy:
+        entities.append(IpmiPowerSwitch(coordinator, entry, client))
+
+    if POWER_HARD_OFF in policy:
+        entities.append(IpmiArmHardOffSwitch(hass, entry))
+
+    if entities:
+        async_add_entities(entities)
 
 
 class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity):
@@ -96,10 +107,10 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the server."""
-        power_control = self._entry.options.get(
+        policy: list[str] = self._entry.options.get(
             CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL
         )
-        if power_control not in (POWER_CONTROL_BOTH, POWER_CONTROL_ON):
+        if POWER_ON not in policy:
             raise HomeAssistantError("Power ON is not permitted by configuration")
 
         try:
@@ -114,10 +125,10 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the server (soft/ACPI shutdown)."""
-        power_control = self._entry.options.get(
+        policy: list[str] = self._entry.options.get(
             CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL
         )
-        if power_control not in (POWER_CONTROL_BOTH, POWER_CONTROL_OFF):
+        if POWER_SOFT_OFF not in policy:
             raise HomeAssistantError("Power OFF is not permitted by configuration")
 
         try:
@@ -139,3 +150,76 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             self._optimistic_state = state
             self._optimistic_expiry = time.monotonic() + hold
             self.async_write_ha_state()
+
+
+class IpmiArmHardOffSwitch(SwitchEntity):
+    """Toggle that arms the force power off capability."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Arm Force Power Off"
+    _attr_icon = "mdi:shield-alert"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the arm switch."""
+        self._hass = hass
+        self._entry = entry
+        self._disarm_cancel: CALLBACK_TYPE | None = None
+        host_name = entry.data[CONF_HOST_NAME]
+        self._attr_unique_id = f"ipmi_{host_name}_arm_hard_off"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host_name)},
+            name=f"IPMI {host_name.title()}",
+            manufacturer="IPMI",
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether hard power off is armed."""
+        return self._hass.data[DOMAIN][self._entry.entry_id].get(
+            "hard_off_armed", False
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Arm the force power off."""
+        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = True
+
+        # Cancel any existing disarm timer
+        if self._disarm_cancel is not None:
+            self._disarm_cancel()
+
+        timeout = self._entry.options.get(
+            CONF_HARD_OFF_DISARM_TIMEOUT, DEFAULT_HARD_OFF_DISARM_TIMEOUT
+        )
+        self._disarm_cancel = async_call_later(
+            self._hass, timeout, self._auto_disarm
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disarm the force power off."""
+        self._disarm(write_state=True)
+
+    def _disarm(self, write_state: bool = False) -> None:
+        """Disarm and cancel the timer."""
+        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = False
+        if self._disarm_cancel is not None:
+            self._disarm_cancel()
+            self._disarm_cancel = None
+        if write_state:
+            self.async_write_ha_state()
+
+    def _auto_disarm(self, _now: Any) -> None:
+        """Auto-disarm callback after timeout."""
+        self._disarm_cancel = None
+        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = False
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Clean up on removal."""
+        if self._disarm_cancel is not None:
+            self._disarm_cancel()
+            self._disarm_cancel = None

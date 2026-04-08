@@ -31,6 +31,7 @@ from .const import (
     CONF_FAN_MODE_QUERY_COMMAND,
     CONF_FAN_MODE_RESPONSE_MAPPING,
     CONF_FAN_MODES,
+    CONF_HARD_OFF_DISARM_TIMEOUT,
     CONF_HOST_NAME,
     CONF_IPMI_IP,
     CONF_MOTHERBOARD,
@@ -49,6 +50,7 @@ from .const import (
     CONF_THRESHOLD_SENSORS,
     CONF_USERNAME,
     CONF_VIRTUAL_MODE_MAPPING,
+    DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -56,10 +58,9 @@ from .const import (
     DEFAULT_POWER_STATE_HOLD,
     MOTHERBOARD_NONE,
     MOTHERBOARD_PROFILES,
-    POWER_CONTROL_BOTH,
-    POWER_CONTROL_NONE,
-    POWER_CONTROL_OFF,
-    POWER_CONTROL_ON,
+    POWER_HARD_OFF,
+    POWER_ON,
+    POWER_SOFT_OFF,
 )
 
 CONF_MANUAL_SENSORS = "manual_sensors"
@@ -71,14 +72,27 @@ from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
-POWER_CONTROL_OPTIONS = [
-    POWER_CONTROL_BOTH,
-    POWER_CONTROL_ON,
-    POWER_CONTROL_OFF,
-    POWER_CONTROL_NONE,
+POWER_CONTROL_SELECT_OPTIONS = [
+    SelectOptionDict(value=POWER_ON, label="Power On"),
+    SelectOptionDict(value=POWER_SOFT_OFF, label="Soft Shutdown"),
+    SelectOptionDict(value=POWER_HARD_OFF, label="Hard Power Off"),
 ]
 
 MOTHERBOARD_OPTIONS = [MOTHERBOARD_NONE] + list(MOTHERBOARD_PROFILES.keys())
+
+
+def _migrate_power_control(value: Any) -> list[str]:
+    """Migrate old string power_control values to the new list format."""
+    if isinstance(value, list):
+        return value
+    # Old format: "both", "on", "off", "none"
+    mapping = {
+        "both": [POWER_ON, POWER_SOFT_OFF],
+        "on": [POWER_ON],
+        "off": [POWER_SOFT_OFF],
+        "none": [],
+    }
+    return mapping.get(value, DEFAULT_POWER_CONTROL)
 
 
 class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -233,6 +247,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options[CONF_POWER_CONTROL] = user_input[CONF_POWER_CONTROL]
             self._options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
             self._options[CONF_POWER_STATE_HOLD] = user_input[CONF_POWER_STATE_HOLD]
+            self._options[CONF_HARD_OFF_DISARM_TIMEOUT] = user_input[CONF_HARD_OFF_DISARM_TIMEOUT]
             return await self.async_step_fan_profile()
 
         return self.async_show_form(
@@ -241,13 +256,22 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(
                         CONF_POWER_CONTROL, default=DEFAULT_POWER_CONTROL
-                    ): vol.In(POWER_CONTROL_OPTIONS),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=POWER_CONTROL_SELECT_OPTIONS,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
                     vol.Required(
                         CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(int, vol.Range(min=5, max=300)),
                     vol.Required(
                         CONF_POWER_STATE_HOLD, default=DEFAULT_POWER_STATE_HOLD
                     ): vol.All(int, vol.Range(min=0, max=300)),
+                    vol.Required(
+                        CONF_HARD_OFF_DISARM_TIMEOUT, default=DEFAULT_HARD_OFF_DISARM_TIMEOUT
+                    ): vol.All(int, vol.Range(min=5, max=300)),
                 }
             ),
         )
@@ -575,6 +599,9 @@ class IpmiControllerOptionsFlow(OptionsFlow):
             return await self.async_step_sensor_select()
 
         current_opts = self._config_entry.options
+        current_power = _migrate_power_control(
+            current_opts.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -582,8 +609,14 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_POWER_CONTROL,
-                        default=current_opts.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL),
-                    ): vol.In(POWER_CONTROL_OPTIONS),
+                        default=current_power,
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=POWER_CONTROL_SELECT_OPTIONS,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
                     vol.Required(
                         CONF_SCAN_INTERVAL,
                         default=current_opts.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -592,6 +625,10 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                         CONF_POWER_STATE_HOLD,
                         default=current_opts.get(CONF_POWER_STATE_HOLD, DEFAULT_POWER_STATE_HOLD),
                     ): vol.All(int, vol.Range(min=0, max=300)),
+                    vol.Required(
+                        CONF_HARD_OFF_DISARM_TIMEOUT,
+                        default=current_opts.get(CONF_HARD_OFF_DISARM_TIMEOUT, DEFAULT_HARD_OFF_DISARM_TIMEOUT),
+                    ): vol.All(int, vol.Range(min=5, max=300)),
                     vol.Required(
                         CONF_MOTHERBOARD,
                         default=current_opts.get(CONF_MOTHERBOARD, MOTHERBOARD_NONE),

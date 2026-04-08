@@ -179,7 +179,7 @@ async def chassis_status_admin(req: ChassisStatusRequest):
 
 @app.post("/api/chassis/power")
 async def chassis_power(req: ChassisPowerRequest):
-    if req.action not in ("on", "soft"):
+    if req.action not in ("on", "soft", "off"):
         raise HTTPException(status_code=400, detail=f"Invalid action: {req.action}")
 
     stdout, stderr, rc = await run_ipmitool(

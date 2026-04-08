@@ -100,6 +100,11 @@ class IpmiClient:
         body = {**self._auth_body(), "action": "soft"}
         await self._request("POST", "/api/chassis/power", body)
 
+    async def hard_power_off(self) -> None:
+        """Send hard (immediate) power off command."""
+        body = {**self._auth_body(), "action": "off"}
+        await self._request("POST", "/api/chassis/power", body)
+
     async def get_fan_mode(self) -> str | None:
         """Query current fan mode using configured raw command."""
         query_cmd = self._fan_config.get("fan_mode_query_command")
