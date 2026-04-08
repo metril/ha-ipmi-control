@@ -12,7 +12,7 @@
           "privilege_level": "Privilege level"
         },
         "data_description": {
-          "host": "A short name for this host (e.g., menoetius)",
+          "host": "A short name for this host",
           "ip": "The IP address of the BMC/IPMI interface",
           "username": "IPMI username for BMC access",
           "privilege_level": "Administrator enables fan mode and threshold control. Operator is read-only."
