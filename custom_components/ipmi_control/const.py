@@ -1,8 +1,8 @@
-"""Constants for the IPMI Controller integration."""
+"""Constants for the IPMI Control integration."""
 
 from __future__ import annotations
 
-DOMAIN = "ipmi_controller"
+DOMAIN = "ipmi_control"
 
 # Config entry data keys
 CONF_ADDON_URL = "addon_url"
