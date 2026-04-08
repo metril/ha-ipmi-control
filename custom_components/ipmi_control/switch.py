@@ -47,7 +47,6 @@ async def async_setup_entry(
 class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity):
     """Switch to control IPMI host power."""
 
-    _attr_assumed_state = True
     _attr_device_class = SwitchDeviceClass.SWITCH
     _attr_has_entity_name = True
     _attr_name = "Power"
