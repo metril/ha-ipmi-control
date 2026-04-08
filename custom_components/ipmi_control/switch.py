@@ -156,7 +156,7 @@ class IpmiArmHardOffSwitch(SwitchEntity):
     """Toggle that arms the force power off capability."""
 
     _attr_has_entity_name = True
-    _attr_name = "Arm Force Power Off"
+    _attr_name = "Power Off (Arm)"
     _attr_icon = "mdi:shield-alert"
 
     def __init__(
