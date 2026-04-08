@@ -1,8 +1,10 @@
 """FastAPI application for IPMI Control add-on."""
 
 import logging
+import os
 import re
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -11,6 +13,41 @@ from .ipmi import is_auth_error, run_ipmitool
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="IPMI Control", version="2.0.0")
+
+
+@app.on_event("startup")
+async def register_discovery():
+    """Register with Supervisor discovery so the integration can find us."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        logger.debug("No SUPERVISOR_TOKEN, skipping discovery registration")
+        return
+
+    hostname = os.environ.get("HOSTNAME", "")
+    if not hostname:
+        logger.warning("No HOSTNAME env var, cannot register discovery")
+        return
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "http://supervisor/discovery",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "service": "ipmi_control",
+                    "config": {
+                        "host": hostname,
+                        "port": 8099,
+                    },
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info("Registered with Supervisor discovery as %s:8099", hostname)
+            else:
+                logger.warning("Discovery registration returned %s: %s", resp.status_code, resp.text)
+    except Exception as err:
+        logger.warning("Failed to register with Supervisor discovery: %s", err)
 
 
 # --- Request models ---
