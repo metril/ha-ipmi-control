@@ -155,6 +155,13 @@ class IpmiClient:
             }
             await self._request("POST", "/api/raw", body)
 
+    async def get_fan_readings(self) -> dict[str, int | None]:
+        """Get current RPM readings for all fans from SDR."""
+        result = await self._request(
+            "POST", "/api/sdr/fan-readings", self._operator_body()
+        )
+        return result.get("fans", {})
+
     async def get_fan_sensors(self) -> list[str]:
         """Query SDR for fan sensor names."""
         result = await self._request("POST", "/api/sdr/fans", self._operator_body())

@@ -189,3 +189,31 @@ async def sdr_fans(req: SdrFansRequest):
                 fans.append(fan_name)
 
     return {"fans": fans}
+
+
+@app.post("/api/sdr/fan-readings")
+async def sdr_fan_readings(req: SdrFansRequest):
+    """Return fan names with their current RPM readings."""
+    stdout, stderr, rc = await run_ipmitool(
+        req.host, req.user, req.password, "OPERATOR",
+        "sdr", "type", "Fan",
+    )
+    _check_error(stderr, rc)
+
+    fans: dict[str, int | None] = {}
+    for line in stdout.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Format: "FAN 1            | 30h | ok  |  7.1 | 3400 RPM"
+        parts = line.split("|")
+        if len(parts) < 5:
+            continue
+        fan_name = parts[0].strip()
+        if not fan_name:
+            continue
+        reading = parts[4].strip()
+        rpm_match = re.search(r"(\d+)\s*RPM", reading)
+        fans[fan_name] = int(rpm_match.group(1)) if rpm_match else None
+
+    return {"fans": fans}

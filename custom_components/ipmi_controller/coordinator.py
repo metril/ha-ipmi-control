@@ -61,6 +61,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(str(err)) from err
 
         fan_thresholds: dict[str, dict[str, int]] = {}
+        fan_readings: dict[str, int | None] = {}
         fans = self.entry.options.get(CONF_FANS, [])
         if fans:
             try:
@@ -70,8 +71,16 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except IpmiConnectionError as err:
                 raise UpdateFailed(str(err)) from err
 
+            try:
+                fan_readings = await self.client.get_fan_readings()
+            except IpmiAuthError as err:
+                raise ConfigEntryAuthFailed(str(err)) from err
+            except IpmiConnectionError as err:
+                raise UpdateFailed(str(err)) from err
+
         return {
             "power": power_state,
             "fan_mode": fan_mode,
             "fan_thresholds": fan_thresholds,
+            "fan_readings": fan_readings,
         }

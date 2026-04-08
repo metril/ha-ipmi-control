@@ -1,10 +1,9 @@
-"""Sensor platform for IPMI Controller — read-only fan threshold display."""
+"""Sensor platform for IPMI Controller — fan speed with threshold attributes."""
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -13,33 +12,43 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import CONF_FANS, CONF_HOST_NAME, DOMAIN
 from .coordinator import IpmiDataUpdateCoordinator
 
+THRESHOLD_ATTR_MAP = {
+    "lnr": "lower_non_recoverable",
+    "lc": "lower_critical",
+    "lnc": "lower_non_critical",
+    "unc": "upper_non_critical",
+    "uc": "upper_critical",
+    "unr": "upper_non_recoverable",
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up IPMI threshold sensors from a config entry."""
+    """Set up IPMI fan speed sensors from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
 
     fans = entry.options.get(CONF_FANS, [])
     entities = [
-        IpmiFanThresholdSensor(coordinator, entry, fan["name"])
+        IpmiFanSpeedSensor(coordinator, entry, fan["name"])
         for fan in fans
     ]
     if entities:
         async_add_entities(entities)
 
 
-class IpmiFanThresholdSensor(
+class IpmiFanSpeedSensor(
     CoordinatorEntity[IpmiDataUpdateCoordinator], SensorEntity
 ):
-    """Sensor showing actual BMC threshold values for a fan."""
+    """Sensor showing fan RPM with threshold attributes."""
 
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_icon = "mdi:thermometer-lines"
+    _attr_icon = "mdi:fan"
+    _attr_native_unit_of_measurement = "RPM"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -47,13 +56,13 @@ class IpmiFanThresholdSensor(
         entry: ConfigEntry,
         fan_name: str,
     ) -> None:
-        """Initialize the threshold sensor."""
+        """Initialize the fan speed sensor."""
         super().__init__(coordinator)
         self._fan_name = fan_name
         host_name = entry.data[CONF_HOST_NAME]
         safe_fan = fan_name.lower().replace(" ", "_")
-        self._attr_unique_id = f"ipmi_{host_name}_{safe_fan}_thresholds"
-        self._attr_name = f"{fan_name} Thresholds"
+        self._attr_unique_id = f"ipmi_{host_name}_{safe_fan}_speed"
+        self._attr_name = f"{fan_name} Speed"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, host_name)},
             name=f"IPMI {host_name.title()}",
@@ -61,23 +70,25 @@ class IpmiFanThresholdSensor(
         )
 
     @property
-    def native_value(self) -> str | None:
-        """Return a summary of current thresholds."""
-        thresholds = self._get_thresholds()
-        if thresholds is None:
+    def native_value(self) -> int | None:
+        """Return current fan RPM."""
+        if self.coordinator.data is None:
             return None
-        lower = f"{thresholds['lnr']}/{thresholds['lc']}/{thresholds['lnc']}"
-        upper = f"{thresholds['unc']}/{thresholds['uc']}/{thresholds['unr']}"
-        return f"{lower} | {upper}"
+        readings = self.coordinator.data.get("fan_readings", {})
+        return readings.get(self._fan_name)
 
     @property
     def extra_state_attributes(self) -> dict[str, int] | None:
-        """Return individual threshold values as attributes."""
-        return self._get_thresholds()
-
-    def _get_thresholds(self) -> dict[str, int] | None:
-        """Get thresholds for this fan from coordinator data."""
+        """Return threshold values as human-readable attributes."""
         if self.coordinator.data is None:
             return None
-        fan_thresholds = self.coordinator.data.get("fan_thresholds", {})
-        return fan_thresholds.get(self._fan_name)
+        thresholds = self.coordinator.data.get("fan_thresholds", {}).get(
+            self._fan_name
+        )
+        if not thresholds:
+            return None
+        return {
+            THRESHOLD_ATTR_MAP[key]: value
+            for key, value in thresholds.items()
+            if key in THRESHOLD_ATTR_MAP
+        }
