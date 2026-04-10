@@ -64,15 +64,24 @@ async def run_ipmitool(
 
 
 def is_auth_error(stderr: str) -> bool:
-    """Check if ipmitool stderr indicates an authentication failure."""
+    """Check if ipmitool stderr indicates an authentication failure.
+
+    Only matches patterns that are genuinely auth/credential failures,
+    verified against ipmitool source (lanplus.c, lan.c). The generic
+    "unable to establish" message is excluded because it also fires
+    for network timeouts and unreachable hosts.
+    """
     lower = stderr.lower()
     return any(
         phrase in lower
         for phrase in [
-            "unable to establish",
-            "authentication type",
-            "password invalid",
-            "unauthorized",
-            "insufficient privilege",
+            "rakp 2 hmac is invalid",
+            "rakp 4 message has invalid integrity check value",
+            "rakp 2 message indicates an error",
+            "rakp 4 message indicates an error",
+            "invalid user name",
+            "insufficient privilege level",
+            "requested privilege level exceeds limit",
+            "invalid session authtype",
         ]
     )
