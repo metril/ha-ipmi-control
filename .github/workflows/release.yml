@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - "v*"
-      - "addon-v*"
 
 jobs:
   release:
