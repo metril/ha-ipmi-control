@@ -15,6 +15,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
+from homeassistant.components.hassio import HassioServiceInfo
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -233,10 +234,13 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_hassio(
-        self, discovery_info: dict[str, Any]
+        self, discovery_info: HassioServiceInfo
     ) -> ConfigFlowResult:
         """Handle Supervisor add-on discovery."""
-        self._addon_url = f"http://{discovery_info.get('host', 'local-ipmi-control')}:{discovery_info.get('port', 8099)}"
+        config = discovery_info.config
+        host = config.get("host", "local-ipmi-control")
+        port = config.get("port", 8099)
+        self._addon_url = f"http://{host}:{port}"
         return await self.async_step_user()
 
     async def async_step_power(
