@@ -128,6 +128,12 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._addon_url != DEFAULT_ADDON_URL:
             return True  # Already detected (e.g., via hassio discovery)
 
+        # Check if hassio discovery already stored the URL
+        stored_url = self.hass.data.get(DOMAIN, {}).get("addon_url")
+        if stored_url:
+            self._addon_url = stored_url
+            return True
+
         # Query the Supervisor discovery API to find our add-on
         session = async_get_clientsession(self.hass)
         supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
@@ -240,7 +246,17 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         config = discovery_info.config
         host = config.get("host", "local-ipmi-control")
         port = config.get("port", 8099)
-        self._addon_url = f"http://{host}:{port}"
+        addon_url = f"http://{host}:{port}"
+
+        # Store the add-on URL for use by manual config flows
+        self.hass.data.setdefault(DOMAIN, {})["addon_url"] = addon_url
+
+        # If entries already exist, just store the URL and abort
+        if self._async_current_entries():
+            return self.async_abort(reason="already_configured")
+
+        # First time — proceed to setup
+        self._addon_url = addon_url
         return await self.async_step_user()
 
     async def async_step_power(
