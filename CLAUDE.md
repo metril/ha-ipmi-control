@@ -16,7 +16,7 @@ HA Core (integration) --HTTP--> Add-on (FastAPI + ipmitool) --IPMI--> BMC
 
 - **Integration** communicates with add-on via HTTP on HA's internal Docker network (port 8099)
 - **Add-on** is stateless — credentials sent per-request, no persistence
-- **No external port mapping** — add-on only reachable internally
+- **Internal-only by default** — port `8099` can be exposed on the host via Supervisor's Network tab if needed
 - One config entry per IPMI host (4 servers = 4 entries)
 
 ## Key Files
