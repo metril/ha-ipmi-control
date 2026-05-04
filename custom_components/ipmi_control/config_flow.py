@@ -62,7 +62,8 @@ from .const import (
 )
 
 CONF_MANUAL_SENSORS = "manual_sensors"
-DEFAULT_ADDON_URL = "http://02ae3471-ipmi-control:8099"
+DEFAULT_ADDON_PORT = 8099
+DEFAULT_ADDON_URL = f"http://02ae3471-ipmi-control:{DEFAULT_ADDON_PORT}"
 
 PRIVILEGE_LEVELS = ["ADMINISTRATOR", "OPERATOR"]
 
