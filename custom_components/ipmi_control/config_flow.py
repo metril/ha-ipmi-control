@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 
 from homeassistant.config_entries import (
@@ -15,7 +13,6 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -65,7 +62,7 @@ from .const import (
 )
 
 CONF_MANUAL_SENSORS = "manual_sensors"
-DEFAULT_ADDON_URL = "http://local-ipmi-control:8099"
+DEFAULT_ADDON_URL = "http://02ae3471-ipmi-control:8099"
 
 PRIVILEGE_LEVELS = ["ADMINISTRATOR", "OPERATOR"]
 
@@ -105,7 +102,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._data: dict[str, Any] = {}
         self._options: dict[str, Any] = {}
-        self._addon_url: str = DEFAULT_ADDON_URL
         self._client: IpmiClient | None = None
         self._sdr_units: dict[str, str] = {}
 
@@ -115,54 +111,13 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             self._client = IpmiClient(
                 session=session,
-                addon_url=self._addon_url,
+                addon_url=self._data[CONF_ADDON_URL],
                 host_ip=self._data[CONF_IPMI_IP],
                 username=self._data[CONF_USERNAME],
                 password=self._data[CONF_PASSWORD],
                 privilege_level=self._data[CONF_PRIVILEGE_LEVEL],
             )
         return self._client
-
-    async def _detect_addon_url(self) -> bool:
-        """Auto-detect the add-on URL via Supervisor discovery API."""
-        if self._addon_url != DEFAULT_ADDON_URL:
-            return True  # Already detected (e.g., via hassio discovery)
-
-        # Check if hassio discovery already stored the URL
-        stored_url = self.hass.data.get(DOMAIN, {}).get("addon_url")
-        if stored_url:
-            self._addon_url = stored_url
-            return True
-
-        # Query the Supervisor discovery API to find our add-on
-        session = async_get_clientsession(self.hass)
-        supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
-        if supervisor_token:
-            try:
-                async with session.get(
-                    "http://supervisor/discovery",
-                    headers={"Authorization": f"Bearer {supervisor_token}"},
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for entry in data.get("data", {}).get("discovery", []):
-                            if entry.get("service") == DOMAIN:
-                                config = entry.get("config", {})
-                                host = config.get("host")
-                                port = config.get("port", 8099)
-                                if host:
-                                    self._addon_url = f"http://{host}:{port}"
-                                    return True
-            except Exception:
-                _LOGGER.debug("Failed to query Supervisor discovery API")
-
-        # Fall back to testing the default URL (works for local add-ons)
-        try:
-            await IpmiClient.test_addon_connection(session, self._addon_url)
-            return True
-        except IpmiConnectionError:
-            return False
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -172,16 +127,18 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             session = async_get_clientsession(self.hass)
+            addon_url = user_input[CONF_ADDON_URL]
 
-            # Verify add-on is reachable
-            if not await self._detect_addon_url():
+            try:
+                await IpmiClient.test_addon_connection(session, addon_url)
+            except IpmiConnectionError:
                 errors["base"] = "addon_not_reachable"
-            else:
-                # Verify IPMI connection
+
+            if not errors:
                 try:
                     await IpmiClient.test_ipmi_connection(
                         session,
-                        self._addon_url,
+                        addon_url,
                         user_input[CONF_IPMI_IP],
                         user_input[CONF_USERNAME],
                         user_input[CONF_PASSWORD],
@@ -191,12 +148,11 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 except IpmiConnectionError:
                     errors["base"] = "cannot_connect"
 
-            # Verify admin privilege if selected
             if not errors and user_input[CONF_PRIVILEGE_LEVEL] == "ADMINISTRATOR":
                 try:
                     await IpmiClient.test_admin_privilege(
                         session,
-                        self._addon_url,
+                        addon_url,
                         user_input[CONF_IPMI_IP],
                         user_input[CONF_USERNAME],
                         user_input[CONF_PASSWORD],
@@ -210,7 +166,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(user_input[CONF_HOST_NAME])
                 self._abort_if_unique_id_configured()
 
-                user_input[CONF_ADDON_URL] = self._addon_url
                 self._data = user_input
                 self._client = None
                 return await self.async_step_power()
@@ -234,30 +189,11 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    vol.Required(CONF_ADDON_URL, default=DEFAULT_ADDON_URL): str,
                 }
             ),
             errors=errors,
         )
-
-    async def async_step_hassio(
-        self, discovery_info: HassioServiceInfo
-    ) -> ConfigFlowResult:
-        """Handle Supervisor add-on discovery."""
-        config = discovery_info.config
-        host = config.get("host", "local-ipmi-control")
-        port = config.get("port", 8099)
-        addon_url = f"http://{host}:{port}"
-
-        # Store the add-on URL for use by manual config flows
-        self.hass.data.setdefault(DOMAIN, {})["addon_url"] = addon_url
-
-        # If entries already exist, just store the URL and abort
-        if self._async_current_entries():
-            return self.async_abort(reason="already_configured")
-
-        # First time — proceed to setup
-        self._addon_url = addon_url
-        return await self.async_step_user()
 
     async def async_step_power(
         self, user_input: dict[str, Any] | None = None
@@ -491,20 +427,27 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         reconfigure_entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            addon_url = reconfigure_entry.data[CONF_ADDON_URL]
             session = async_get_clientsession(self.hass)
+            addon_url = user_input[CONF_ADDON_URL]
+
             try:
-                await IpmiClient.test_ipmi_connection(
-                    session,
-                    addon_url,
-                    user_input[CONF_IPMI_IP],
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD],
-                )
-            except IpmiAuthError:
-                errors["base"] = "invalid_auth"
+                await IpmiClient.test_addon_connection(session, addon_url)
             except IpmiConnectionError:
-                errors["base"] = "cannot_connect"
+                errors["base"] = "addon_not_reachable"
+
+            if not errors:
+                try:
+                    await IpmiClient.test_ipmi_connection(
+                        session,
+                        addon_url,
+                        user_input[CONF_IPMI_IP],
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
+                    )
+                except IpmiAuthError:
+                    errors["base"] = "invalid_auth"
+                except IpmiConnectionError:
+                    errors["base"] = "cannot_connect"
 
             if not errors and user_input[CONF_PRIVILEGE_LEVEL] == "ADMINISTRATOR":
                 try:
@@ -521,9 +464,8 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     pass
 
             if not errors:
-                # Preserve host name and addon URL from original entry
+                # Preserve host name from original entry
                 user_input[CONF_HOST_NAME] = reconfigure_entry.data[CONF_HOST_NAME]
-                user_input[CONF_ADDON_URL] = addon_url
                 return self.async_update_reload_and_abort(
                     reconfigure_entry, data=user_input
                 )
@@ -553,6 +495,10 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    vol.Required(
+                        CONF_ADDON_URL,
+                        default=reconfigure_entry.data[CONF_ADDON_URL],
+                    ): str,
                 }
             ),
             errors=errors,

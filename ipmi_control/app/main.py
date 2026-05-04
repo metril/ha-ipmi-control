@@ -1,10 +1,8 @@
 """FastAPI application for IPMI Control add-on."""
 
 import logging
-import os
 import re
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -13,56 +11,6 @@ from .ipmi import is_auth_error, run_ipmitool
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="IPMI Control", version="2.0.0")
-
-
-@app.on_event("startup")
-async def register_discovery():
-    """Register with Supervisor discovery so the integration can find us."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
-    if not token:
-        logger.debug("No SUPERVISOR_TOKEN, skipping discovery registration")
-        return
-
-    headers = {"Authorization": f"Bearer {token}"}
-
-    try:
-        async with httpx.AsyncClient() as client:
-            # Query our own add-on info to get the slug
-            info_resp = await client.get(
-                "http://supervisor/addons/self/info",
-                headers=headers,
-                timeout=10,
-            )
-            if info_resp.status_code != 200:
-                logger.warning("Could not query add-on info: %s", info_resp.text)
-                return
-
-            slug = info_resp.json().get("data", {}).get("slug", "")
-            if not slug:
-                logger.warning("Add-on info returned no slug")
-                return
-
-            # Hostname is the slug with underscores replaced by hyphens
-            hostname = slug.replace("_", "-")
-
-            resp = await client.post(
-                "http://supervisor/discovery",
-                headers=headers,
-                json={
-                    "service": "ipmi_control",
-                    "config": {
-                        "host": hostname,
-                        "port": 8099,
-                    },
-                },
-                timeout=10,
-            )
-            if resp.status_code in (200, 201):
-                logger.info("Registered with Supervisor discovery as %s:8099", hostname)
-            else:
-                logger.warning("Discovery registration returned %s: %s", resp.status_code, resp.text)
-    except Exception as err:
-        logger.warning("Failed to register with Supervisor discovery: %s", err)
 
 
 # --- Request models ---
