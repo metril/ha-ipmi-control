@@ -9,13 +9,15 @@
           "ip": "BMC IP address",
           "username": "Username",
           "password": "Password",
-          "privilege_level": "Privilege level"
+          "privilege_level": "Privilege level",
+          "addon_url": "Add-on URL"
         },
         "data_description": {
           "host": "A short name for this host",
           "ip": "The IP address of the BMC/IPMI interface",
           "username": "IPMI username for BMC access",
-          "privilege_level": "Administrator enables fan mode and threshold control. Operator is read-only."
+          "privilege_level": "Administrator enables fan mode and threshold control. Operator is read-only.",
+          "addon_url": "URL of the IPMI Control add-on. Leave the default if running the add-on locally; change it if the add-on is hosted elsewhere."
         }
       },
       "power": {
@@ -71,7 +73,11 @@
           "ip": "BMC IP address",
           "username": "Username",
           "password": "Password",
-          "privilege_level": "Privilege level"
+          "privilege_level": "Privilege level",
+          "addon_url": "Add-on URL"
+        },
+        "data_description": {
+          "addon_url": "URL of the IPMI Control add-on. Leave the default if running the add-on locally; change it if the add-on is hosted elsewhere."
         }
       }
     },
