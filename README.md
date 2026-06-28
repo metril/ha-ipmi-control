@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/metril/ha-ipmi-control/main/custom_components/ipmi_control/brand/logo.png" alt="IPMI Control" width="312">
+</p>
+
 # IPMI Control for Home Assistant
 
 A Home Assistant custom integration + add-on to manage server power, fan control, and sensor monitoring via IPMI. Uses a companion add-on running `ipmitool` for reliable BMC communication.
