@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -20,6 +21,8 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
 )
 
 from .const import (
@@ -59,6 +62,7 @@ from .const import (
     POWER_HARD_OFF,
     POWER_ON,
     POWER_SOFT_OFF,
+    migrate_power_control,
 )
 
 CONF_MANUAL_SENSORS = "manual_sensors"
@@ -66,6 +70,20 @@ DEFAULT_ADDON_PORT = 8099
 DEFAULT_ADDON_URL = f"http://02ae3471-ipmi-control:{DEFAULT_ADDON_PORT}"
 
 PRIVILEGE_LEVELS = ["ADMINISTRATOR", "OPERATOR"]
+
+# Virtual fan mode management (options flow only)
+CONF_VIRTUAL_MODE_ACTION = "virtual_mode_action"
+CONF_VIRTUAL_MODE_INTERNAL_NAME = "virtual_mode_internal_name"
+CONF_VIRTUAL_MODE_DISPLAY_NAME = "virtual_mode_display_name"
+CONF_VIRTUAL_MODE_MAPS_TO = "virtual_mode_maps_to"
+CONF_VIRTUAL_MODE_COMMANDS = "virtual_mode_commands"
+
+VIRTUAL_MODE_ACTION_ADD = "add"
+VIRTUAL_MODE_ACTION_DONE = "done"
+VIRTUAL_MODE_ACTION_EDIT_PREFIX = "edit:"
+VIRTUAL_MODE_ACTION_REMOVE_PREFIX = "remove:"
+
+INTERNAL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
@@ -80,18 +98,97 @@ POWER_CONTROL_SELECT_OPTIONS = [
 MOTHERBOARD_OPTIONS = [MOTHERBOARD_NONE] + list(MOTHERBOARD_PROFILES.keys())
 
 
-def _migrate_power_control(value: Any) -> list[str]:
-    """Migrate old string power_control values to the new list format."""
-    if isinstance(value, list):
-        return value
-    # Old format: "both", "on", "off", "none"
-    mapping = {
-        "both": [POWER_ON, POWER_SOFT_OFF],
-        "on": [POWER_ON],
-        "off": [POWER_SOFT_OFF],
-        "none": [],
+def _build_profile_options(
+    motherboard: str, existing_options: dict[str, Any]
+) -> dict[str, Any]:
+    """Build the fan mode option keys for a motherboard profile.
+
+    Any user-defined virtual modes found in ``existing_options`` are carried
+    over so that (re)selecting a motherboard profile never silently wipes
+    them out.
+    """
+    profile = MOTHERBOARD_PROFILES[motherboard]
+    fan_modes = list(profile["fan_modes"])
+    display_mapping = dict(profile["fan_mode_display_mapping"])
+    commands = {k: list(v) for k, v in profile["fan_mode_commands"].items()}
+    virtual_mapping: dict[str, str] = {}
+
+    existing_virtual_mapping = existing_options.get(CONF_VIRTUAL_MODE_MAPPING, {})
+    existing_display = existing_options.get(CONF_FAN_MODE_DISPLAY_MAPPING, {})
+    existing_commands = existing_options.get(CONF_FAN_MODE_COMMANDS, {})
+    existing_fan_modes = existing_options.get(CONF_FAN_MODES, [])
+
+    for virtual_name, maps_to in existing_virtual_mapping.items():
+        if virtual_name not in existing_fan_modes:
+            continue  # stale entry, drop it
+        fan_modes.append(virtual_name)
+        display_mapping[virtual_name] = existing_display.get(
+            virtual_name, virtual_name.title()
+        )
+        commands[virtual_name] = existing_commands.get(virtual_name, [])
+        virtual_mapping[virtual_name] = maps_to
+
+    return {
+        CONF_FAN_MODES: fan_modes,
+        CONF_FAN_MODE_DISPLAY_MAPPING: display_mapping,
+        CONF_FAN_MODE_QUERY_COMMAND: profile["fan_mode_query_command"],
+        CONF_FAN_MODE_RESPONSE_MAPPING: profile["fan_mode_response_mapping"],
+        CONF_FAN_MODE_COMMANDS: commands,
+        CONF_VIRTUAL_MODE_MAPPING: virtual_mapping,
     }
-    return mapping.get(value, DEFAULT_POWER_CONTROL)
+
+
+def _format_virtual_mode_commands(commands: list[dict[str, Any]]) -> str:
+    """Format parsed IPMI command dicts back into raw hex text for editing."""
+    lines = []
+    for cmd in commands:
+        byte_values = [cmd["netfn"], cmd["command"], *cmd.get("data", [])]
+        lines.append(" ".join(f"0x{b:02x}" for b in byte_values))
+    return "\n".join(lines)
+
+
+def _parse_virtual_mode_commands(
+    text: str,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Parse raw IPMI command text into command dicts.
+
+    Each non-empty line must be whitespace-separated hex byte tokens, e.g.
+    ``0x30 0x45 0x01 0x00``: the first byte is netfn, the second is command,
+    and any remaining bytes are data. Returns ``(commands, error_key)`` where
+    ``error_key`` is ``None`` on success (and ``commands`` is ``[]`` on
+    failure).
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return [], "commands_empty"
+
+    commands: list[dict[str, Any]] = []
+    for line in lines:
+        tokens = line.split()
+        if len(tokens) < 2:
+            return [], "commands_too_short"
+
+        byte_values: list[int] = []
+        for token in tokens:
+            if not token.lower().startswith("0x"):
+                return [], "commands_invalid_hex"
+            try:
+                value = int(token, 16)
+            except ValueError:
+                return [], "commands_invalid_hex"
+            if not 0x00 <= value <= 0xFF:
+                return [], "commands_byte_range"
+            byte_values.append(value)
+
+        commands.append(
+            {
+                "netfn": byte_values[0],
+                "command": byte_values[1],
+                "data": byte_values[2:],
+            }
+        )
+
+    return commands, None
 
 
 class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -127,6 +224,13 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Guard against configuring the same physical BMC twice under two
+            # different host names — uniqueness below is keyed on the
+            # user-typed host name, not the BMC address.
+            for entry in self._async_current_entries():
+                if entry.data.get(CONF_IPMI_IP) == user_input[CONF_IPMI_IP]:
+                    return self.async_abort(reason="already_configured")
+
             session = async_get_clientsession(self.hass)
             addon_url = user_input[CONF_ADDON_URL]
 
@@ -242,21 +346,10 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options[CONF_MOTHERBOARD] = motherboard
 
             if motherboard != MOTHERBOARD_NONE and motherboard in MOTHERBOARD_PROFILES:
-                profile = MOTHERBOARD_PROFILES[motherboard]
-                self._options[CONF_FAN_MODES] = profile["fan_modes"]
-                self._options[CONF_FAN_MODE_DISPLAY_MAPPING] = profile[
-                    "fan_mode_display_mapping"
-                ]
-                self._options[CONF_FAN_MODE_QUERY_COMMAND] = profile[
-                    "fan_mode_query_command"
-                ]
-                self._options[CONF_FAN_MODE_RESPONSE_MAPPING] = profile[
-                    "fan_mode_response_mapping"
-                ]
-                self._options[CONF_FAN_MODE_COMMANDS] = profile["fan_mode_commands"]
-                self._options[CONF_VIRTUAL_MODE_MAPPING] = user_input.get(
-                    CONF_VIRTUAL_MODE_MAPPING, {}
-                )
+                # Fresh entries never have pre-existing virtual modes, but
+                # route through the shared builder for consistency with the
+                # options flow's rebuild logic.
+                self._options.update(_build_profile_options(motherboard, self._options))
 
             return await self.async_step_sensor_select()
 
@@ -428,6 +521,16 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         reconfigure_entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            # Same duplicate-BMC guard as async_step_user, but exclude the
+            # entry being reconfigured — comparing it against itself must
+            # not trip the guard.
+            for entry in self._async_current_entries():
+                if (
+                    entry.entry_id != reconfigure_entry.entry_id
+                    and entry.data.get(CONF_IPMI_IP) == user_input[CONF_IPMI_IP]
+                ):
+                    return self.async_abort(reason="already_configured")
+
             session = async_get_clientsession(self.hass)
             addon_url = user_input[CONF_ADDON_URL]
 
@@ -525,6 +628,9 @@ class IpmiControllerOptionsFlow(OptionsFlow):
         self._selected_threshold_sensors: list[str] = []
         self._threshold_index: int = 0
         self._sdr_units: dict[str, str] = {}
+        # Virtual fan mode management
+        self._real_fan_modes: list[str] = []
+        self._editing_virtual_mode: str | None = None
 
     def _get_client(self) -> IpmiClient:
         """Get or create an IpmiClient from config entry data."""
@@ -550,23 +656,35 @@ class IpmiControllerOptionsFlow(OptionsFlow):
             self._new_options = {**self._config_entry.options, **user_input}
 
             if motherboard != MOTHERBOARD_NONE and motherboard in MOTHERBOARD_PROFILES:
-                profile = MOTHERBOARD_PROFILES[motherboard]
-                self._new_options[CONF_FAN_MODES] = profile["fan_modes"]
-                self._new_options[CONF_FAN_MODE_DISPLAY_MAPPING] = profile[
-                    "fan_mode_display_mapping"
-                ]
-                self._new_options[CONF_FAN_MODE_QUERY_COMMAND] = profile[
-                    "fan_mode_query_command"
-                ]
-                self._new_options[CONF_FAN_MODE_RESPONSE_MAPPING] = profile[
-                    "fan_mode_response_mapping"
-                ]
-                self._new_options[CONF_FAN_MODE_COMMANDS] = profile["fan_mode_commands"]
+                # Rebuild from the profile, preserving any existing
+                # user-defined virtual modes rather than wiping them out.
+                self._new_options.update(
+                    _build_profile_options(motherboard, self._config_entry.options)
+                )
+                self._real_fan_modes = list(
+                    MOTHERBOARD_PROFILES[motherboard]["fan_modes"]
+                )
+                return await self.async_step_virtual_modes()
+
+            # Motherboard set to "none": drop every fan-mode key. Without this
+            # the previous profile's config survives in the spread above, and
+            # select.py keys off CONF_FAN_MODES (not CONF_MOTHERBOARD), so the
+            # Fan Mode entity would keep issuing raw commands to the BMC after
+            # the user disabled fan control.
+            for fan_key in (
+                CONF_FAN_MODES,
+                CONF_FAN_MODE_DISPLAY_MAPPING,
+                CONF_FAN_MODE_COMMANDS,
+                CONF_FAN_MODE_QUERY_COMMAND,
+                CONF_FAN_MODE_RESPONSE_MAPPING,
+                CONF_VIRTUAL_MODE_MAPPING,
+            ):
+                self._new_options.pop(fan_key, None)
 
             return await self.async_step_sensor_select()
 
         current_opts = self._config_entry.options
-        current_power = _migrate_power_control(
+        current_power = migrate_power_control(
             current_opts.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
         )
 
@@ -602,6 +720,215 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                     ): vol.In(MOTHERBOARD_OPTIONS),
                 }
             ),
+        )
+
+    def _remove_virtual_mode(self, internal_name: str) -> None:
+        """Remove a virtual mode from all four option keys it is merged into."""
+        self._new_options.get(CONF_VIRTUAL_MODE_MAPPING, {}).pop(internal_name, None)
+        self._new_options.get(CONF_FAN_MODE_DISPLAY_MAPPING, {}).pop(internal_name, None)
+        self._new_options.get(CONF_FAN_MODE_COMMANDS, {}).pop(internal_name, None)
+        fan_modes = self._new_options.get(CONF_FAN_MODES, [])
+        if internal_name in fan_modes:
+            fan_modes.remove(internal_name)
+
+    async def async_step_virtual_modes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """List existing virtual fan modes and let the user add/edit/remove them.
+
+        A virtual mode is a fan mode the BMC has no concept of — the user
+        builds it from a raw IPMI command sequence, and it reports back as
+        whichever real mode it is mapped to.
+        """
+        if user_input is not None:
+            action = user_input[CONF_VIRTUAL_MODE_ACTION]
+
+            if action == VIRTUAL_MODE_ACTION_DONE:
+                return await self.async_step_sensor_select()
+
+            if action == VIRTUAL_MODE_ACTION_ADD:
+                self._editing_virtual_mode = None
+                return await self.async_step_virtual_mode_edit()
+
+            if action.startswith(VIRTUAL_MODE_ACTION_EDIT_PREFIX):
+                self._editing_virtual_mode = action[
+                    len(VIRTUAL_MODE_ACTION_EDIT_PREFIX):
+                ]
+                return await self.async_step_virtual_mode_edit()
+
+            if action.startswith(VIRTUAL_MODE_ACTION_REMOVE_PREFIX):
+                self._remove_virtual_mode(
+                    action[len(VIRTUAL_MODE_ACTION_REMOVE_PREFIX):]
+                )
+                return await self.async_step_virtual_modes()
+
+        virtual_modes = self._new_options.get(CONF_VIRTUAL_MODE_MAPPING, {})
+        display_mapping = self._new_options.get(CONF_FAN_MODE_DISPLAY_MAPPING, {})
+
+        action_options = [
+            SelectOptionDict(
+                value=VIRTUAL_MODE_ACTION_ADD, label="Add a new virtual mode"
+            ),
+        ]
+        for internal_name in virtual_modes:
+            display = display_mapping.get(internal_name, internal_name.title())
+            action_options.append(
+                SelectOptionDict(
+                    value=f"{VIRTUAL_MODE_ACTION_EDIT_PREFIX}{internal_name}",
+                    label=f"Edit '{display}'",
+                )
+            )
+            action_options.append(
+                SelectOptionDict(
+                    value=f"{VIRTUAL_MODE_ACTION_REMOVE_PREFIX}{internal_name}",
+                    label=f"Remove '{display}'",
+                )
+            )
+        action_options.append(
+            SelectOptionDict(value=VIRTUAL_MODE_ACTION_DONE, label="Done")
+        )
+
+        return self.async_show_form(
+            step_id="virtual_modes",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_VIRTUAL_MODE_ACTION, default=VIRTUAL_MODE_ACTION_DONE
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=action_options,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+            description_placeholders={"virtual_mode_count": str(len(virtual_modes))},
+        )
+
+    async def async_step_virtual_mode_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add or edit a single virtual fan mode."""
+        errors: dict[str, str] = {}
+        editing = self._editing_virtual_mode
+
+        virtual_modes = self._new_options.get(CONF_VIRTUAL_MODE_MAPPING, {})
+        display_mapping = self._new_options.get(CONF_FAN_MODE_DISPLAY_MAPPING, {})
+        commands_mapping = self._new_options.get(CONF_FAN_MODE_COMMANDS, {})
+        fan_modes = self._new_options.get(CONF_FAN_MODES, [])
+
+        if user_input is not None:
+            internal_name = user_input[CONF_VIRTUAL_MODE_INTERNAL_NAME].strip().lower()
+            display_name = user_input[CONF_VIRTUAL_MODE_DISPLAY_NAME].strip()
+            maps_to = user_input[CONF_VIRTUAL_MODE_MAPS_TO]
+            commands_text = user_input[CONF_VIRTUAL_MODE_COMMANDS]
+
+            if not INTERNAL_NAME_RE.match(internal_name):
+                errors[CONF_VIRTUAL_MODE_INTERNAL_NAME] = "invalid_internal_name"
+            elif internal_name in self._real_fan_modes or (
+                internal_name in virtual_modes and internal_name != editing
+            ):
+                errors[CONF_VIRTUAL_MODE_INTERNAL_NAME] = "duplicate_internal_name"
+
+            if not display_name:
+                errors[CONF_VIRTUAL_MODE_DISPLAY_NAME] = "display_name_required"
+
+            parsed_commands, command_error = _parse_virtual_mode_commands(
+                commands_text
+            )
+            if command_error:
+                errors[CONF_VIRTUAL_MODE_COMMANDS] = command_error
+
+            if not errors:
+                if editing and editing != internal_name:
+                    # Renamed: drop the old entry before writing the new one.
+                    virtual_modes.pop(editing, None)
+                    display_mapping.pop(editing, None)
+                    commands_mapping.pop(editing, None)
+                    if editing in fan_modes:
+                        fan_modes.remove(editing)
+
+                if internal_name not in fan_modes:
+                    fan_modes.append(internal_name)
+                display_mapping[internal_name] = display_name
+                commands_mapping[internal_name] = parsed_commands
+                virtual_modes[internal_name] = maps_to
+
+                self._new_options[CONF_FAN_MODES] = fan_modes
+                self._new_options[CONF_FAN_MODE_DISPLAY_MAPPING] = display_mapping
+                self._new_options[CONF_FAN_MODE_COMMANDS] = commands_mapping
+                self._new_options[CONF_VIRTUAL_MODE_MAPPING] = virtual_modes
+
+                self._editing_virtual_mode = None
+                return await self.async_step_virtual_modes()
+
+        default_maps_to = self._real_fan_modes[0] if self._real_fan_modes else ""
+        if editing:
+            defaults = {
+                CONF_VIRTUAL_MODE_INTERNAL_NAME: editing,
+                CONF_VIRTUAL_MODE_DISPLAY_NAME: display_mapping.get(
+                    editing, editing.title()
+                ),
+                CONF_VIRTUAL_MODE_MAPS_TO: virtual_modes.get(
+                    editing, default_maps_to
+                ),
+                CONF_VIRTUAL_MODE_COMMANDS: _format_virtual_mode_commands(
+                    commands_mapping.get(editing, [])
+                ),
+            }
+        else:
+            defaults = {
+                CONF_VIRTUAL_MODE_INTERNAL_NAME: "",
+                CONF_VIRTUAL_MODE_DISPLAY_NAME: "",
+                CONF_VIRTUAL_MODE_MAPS_TO: default_maps_to,
+                CONF_VIRTUAL_MODE_COMMANDS: "",
+            }
+
+        # If the form was resubmitted with errors, keep what the user typed
+        # instead of reverting to the stored/blank defaults.
+        if user_input is not None:
+            defaults.update(
+                {
+                    key: user_input[key]
+                    for key in defaults
+                    if key in user_input
+                }
+            )
+
+        return self.async_show_form(
+            step_id="virtual_mode_edit",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_VIRTUAL_MODE_INTERNAL_NAME,
+                        default=defaults[CONF_VIRTUAL_MODE_INTERNAL_NAME],
+                    ): str,
+                    vol.Required(
+                        CONF_VIRTUAL_MODE_DISPLAY_NAME,
+                        default=defaults[CONF_VIRTUAL_MODE_DISPLAY_NAME],
+                    ): str,
+                    vol.Required(
+                        CONF_VIRTUAL_MODE_MAPS_TO,
+                        default=defaults[CONF_VIRTUAL_MODE_MAPS_TO],
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(
+                                    value=mode,
+                                    label=display_mapping.get(mode, mode.title()),
+                                )
+                                for mode in self._real_fan_modes
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
+                        CONF_VIRTUAL_MODE_COMMANDS,
+                        default=defaults[CONF_VIRTUAL_MODE_COMMANDS],
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_sensor_select(

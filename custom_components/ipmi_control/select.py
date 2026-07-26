@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -46,7 +47,9 @@ async def async_setup_entry(
         async_add_entities([IpmiFanModeSelect(coordinator, entry, client)])
 
 
-class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEntity):
+class IpmiFanModeSelect(
+    CoordinatorEntity[IpmiDataUpdateCoordinator], RestoreEntity, SelectEntity
+):
     """Select entity for IPMI fan mode control."""
 
     _attr_has_entity_name = True
@@ -94,6 +97,21 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
             manufacturer="IPMI",
         )
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known display selection after startup or reload.
+
+        Plain instance state (``_last_ha_selection``) is wiped on every HA
+        restart and every options-flow save (which reloads the entry).
+        Without restoring it, the select would silently revert to showing
+        whatever real mode the BMC reports instead of the virtual mode the
+        user actually selected.
+        """
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state in self._attr_options:
+            self._last_ha_selection = last_state.state
+
     @property
     def current_option(self) -> str | None:
         """Return the current fan mode as a display name."""
@@ -112,12 +130,6 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
         if internal_mode is None:
             raise HomeAssistantError(f"Unknown fan mode: {option}")
 
-        # Resolve virtual mode to actual IPMI mode
-        actual_mode = self._virtual_mode_mapping.get(internal_mode, internal_mode)
-
-        # Track the user's selection (may be virtual)
-        self._last_ha_selection = option
-
         try:
             await self._client.set_fan_mode(internal_mode)
         except IpmiAuthError as err:
@@ -125,6 +137,11 @@ class IpmiFanModeSelect(CoordinatorEntity[IpmiDataUpdateCoordinator], SelectEnti
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
+
+        # Only commit the selection once the command has actually succeeded,
+        # so a failed command doesn't leave the entity claiming a mode that
+        # was never applied.
+        self._last_ha_selection = option
 
         await self.coordinator.async_request_refresh()
 
