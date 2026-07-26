@@ -5,29 +5,65 @@ on:
     tags:
       - "addon-v*"
 
+concurrency:
+  group: addon-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    name: Build and publish add-on
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.arch }} image
+    runs-on: ${{ matrix.os }}
     permissions:
-      packages: write
       contents: read
+      packages: write
+      id-token: write # required for Cosign keyless signing (build-image default: cosign=true)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Keep build_from values in sync with ipmi_control/build.yaml —
+          # the new composable build-image action does not read build.yaml itself.
+          - arch: amd64
+            os: ubuntu-24.04
+            build_from: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.21
+          - arch: aarch64
+            os: ubuntu-24.04-arm # native GH-hosted arm64 runner — no QEMU emulation needed
+            build_from: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.21
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve and validate version
+        id: version
+        run: |
+          config_version="$(grep -m1 '^version:' ipmi_control/config.yaml | sed -E 's/version: *"?([^"]+)"?/\1/')"
+          tag_version="${GITHUB_REF_NAME#addon-v}"
+          if [ "${config_version}" != "${tag_version}" ]; then
+            echo "::error::Tag addon-v${tag_version} does not match ipmi_control/config.yaml version ${config_version}"
+            exit 1
+          fi
+          echo "version=${config_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push add-on
-        uses: home-assistant/builder@master
+      - name: Build and push image
+        # NOTE: home-assistant/builder (the old monolithic action) is deprecated
+        # since 2026.03.0 and slated for removal; this uses its composable
+        # replacement. Image naming intentionally preserves the existing
+        # arch-suffix convention (ghcr.io/.../ha-ipmi-control-{arch}) declared
+        # in ipmi_control/config.yaml — do NOT switch to
+        # prepare-multi-arch-matrix's default arch-prefix naming, and do NOT
+        # add a publish-multi-arch-manifest step: HA Supervisor pulls a
+        # specific per-arch tag directly via config.yaml's `image:` template,
+        # it does not use a combined multi-arch manifest for add-ons.
+        uses: home-assistant/builder/actions/build-image@4de35182ce1e329181bffcbcc84d33db5e2c7e10 # 2026.06.0
         with:
-          args: |
-            --amd64 \
-            --aarch64 \
-            --target ipmi_control \
-            --docker-hub ghcr.io/${{ github.repository_owner }}
+          arch: ${{ matrix.arch }}
+          context: ipmi_control
+          build-args: |
+            BUILD_FROM=${{ matrix.build_from }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image: ghcr.io/${{ github.repository_owner }}/ha-ipmi-control-${{ matrix.arch }}
+          image-tags: |
+            ${{ steps.version.outputs.version }}
+            latest
+          push: "true"
+          version: ${{ steps.version.outputs.version }}
