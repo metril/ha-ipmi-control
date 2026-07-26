@@ -3,14 +3,21 @@
 import logging
 import re
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 
 from .ipmi import is_auth_error, run_ipmitool
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IPMI Control", version="2.0.0")
+app = FastAPI(title="IPMI Control", version="2.4.0")
+
+# Only the documented raw-byte form is allowed, e.g. "raw 0x30 0x45 0x00".
+# Prevents argument injection into ipmitool via the /api/raw command field.
+_RAW_COMMAND_RE = re.compile(r"^raw(\s+0x[0-9a-fA-F]{1,2})+$")
 
 
 # --- Request models ---
@@ -33,6 +40,15 @@ class ChassisPowerRequest(IpmiCredentials):
 class RawCommandRequest(IpmiCredentials):
     privilege: str = "ADMINISTRATOR"
     command: str  # e.g., "raw 0x30 0x45 0x00"
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, v: str) -> str:
+        if not _RAW_COMMAND_RE.match(v):
+            raise ValueError(
+                "command must be raw IPMI byte form, e.g. 'raw 0x30 0x45 0x00'"
+            )
+        return v
 
 
 class SensorThresholdsGetRequest(IpmiCredentials):
@@ -84,6 +100,24 @@ def _parse_sdr_line(line: str) -> dict | None:
             unit = match.group(2).strip()
 
     return {"name": name, "value": value, "unit": unit, "status": status}
+
+
+# --- Exception handlers ---
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return 400 for invalid /api/raw command payloads.
+
+    Pydantic validation failures return 422 by default; the invalid `command`
+    format is treated as a client input error (400) rather than a generic
+    schema validation error, since it guards against ipmitool argument
+    injection. Other validation failures keep the default 422 behavior.
+    """
+    for error in exc.errors():
+        if error.get("loc") == ("body", "command"):
+            return JSONResponse(status_code=400, content={"detail": error.get("msg")})
+    return await request_validation_exception_handler(request, exc)
 
 
 # --- Endpoints ---
