@@ -38,7 +38,7 @@ async def run_ipmitool(
         async with SEMAPHORE:
             cmd = [
                 "ipmitool", "-I", "lanplus",
-                "-H", host, "-U", user, "-P", password,
+                "-H", host, "-U", user, "-E",
                 "-L", privilege,
                 *args,
             ]
@@ -46,6 +46,7 @@ async def run_ipmitool(
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                env={**os.environ, "IPMI_PASSWORD": password},
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
