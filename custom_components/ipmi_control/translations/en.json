@@ -91,7 +91,8 @@
     },
     "abort": {
       "already_configured": "This IPMI host is already configured",
-      "reauth_successful": "Re-authentication was successful"
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "options": {
@@ -109,6 +110,29 @@
         "data_description": {
           "power_control": "Select which power operations are allowed for this host",
           "hard_off_disarm_timeout": "How long the hard power off stays armed before auto-disarming (5-300 seconds)"
+        }
+      },
+      "virtual_modes": {
+        "title": "Virtual Fan Modes",
+        "description": "Manage user-defined virtual fan modes ({virtual_mode_count} configured). A virtual mode has no direct BMC equivalent — it runs a custom raw IPMI command sequence and reports back as the closest real mode the BMC understands.",
+        "data": {
+          "virtual_mode_action": "Action"
+        }
+      },
+      "virtual_mode_edit": {
+        "title": "Virtual Fan Mode",
+        "description": "Define a virtual fan mode from a raw IPMI command sequence.",
+        "data": {
+          "virtual_mode_internal_name": "Internal name",
+          "virtual_mode_display_name": "Display name",
+          "virtual_mode_maps_to": "Maps to",
+          "virtual_mode_commands": "Commands"
+        },
+        "data_description": {
+          "virtual_mode_internal_name": "A short slug (lowercase letters, numbers, underscores) used internally. Must not match an existing fan mode or another virtual mode.",
+          "virtual_mode_display_name": "The name shown in the Fan Mode select entity, e.g. 'Quiet'.",
+          "virtual_mode_maps_to": "The real fan mode the BMC will report while this virtual mode is active.",
+          "virtual_mode_commands": "One raw IPMI command per line, e.g. '0x30 0x45 0x01 0x00'. The first byte is netfn, the second is command, and any remaining bytes are data."
         }
       },
       "sensor_select": {
@@ -139,6 +163,32 @@
           "thresh_unc": "Upper Non-Critical (UNC)",
           "thresh_uc": "Upper Critical (UC)",
           "thresh_unr": "Upper Non-Recoverable (UNR)"
+        }
+      }
+    },
+    "error": {
+      "sdr_query_failed": "Failed to query sensors from BMC. You can enter sensor names manually below.",
+      "invalid_internal_name": "Internal name must start with a lowercase letter and contain only lowercase letters, numbers, and underscores",
+      "duplicate_internal_name": "This name is already used by another fan mode or virtual mode",
+      "display_name_required": "Display name is required",
+      "commands_empty": "Enter at least one command",
+      "commands_too_short": "Each command line needs at least a netfn and a command byte",
+      "commands_invalid_hex": "Commands must be hex byte values, e.g. 0x30 0x45 0x01 0x00",
+      "commands_byte_range": "Byte values must be between 0x00 and 0xff"
+    }
+  },
+  "services": {
+    "force_power_off": {
+      "name": "Force power off",
+      "description": "Immediately cut power to an IPMI host (hard power off), bypassing a graceful shutdown. Requires the host to be armed first via its \"Power Off (Arm)\" switch, unless confirm is set to true.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The force power off button entity of the target host."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Set to true to execute immediately without requiring the host to be pre-armed via its \"Power Off (Arm)\" switch."
         }
       }
     }
