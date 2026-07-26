@@ -70,7 +70,7 @@ class IpmiClient:
                     detail = (await resp.json()).get("detail", f"HTTP {resp.status}")
                     raise IpmiConnectionError(detail)
                 return await resp.json()
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise IpmiConnectionError(
                 f"Failed to connect to IPMI add-on: {err}"
             ) from err
@@ -126,11 +126,21 @@ class IpmiClient:
         result = await self._request("POST", "/api/raw", body)
         output = result.get("output", "").strip()
 
-        for response_key, mode_name in response_mapping.items():
-            key = int(response_key) if isinstance(response_key, str) else response_key
-            response_hex = f"{key:02x}"
-            if response_hex in output.lower():
-                return mode_name
+        # Only the first byte of the response identifies the fan mode.
+        # Comparing the whole output as a substring is unreliable: a
+        # multi-byte response like "01 00" would match key 0x00 before
+        # reaching key 0x01 depending on dict-insertion order.
+        first_token = output.split()[0] if output.split() else ""
+        try:
+            first_byte = int(first_token, 16)
+        except ValueError:
+            first_byte = None
+
+        if first_byte is not None:
+            for response_key, mode_name in response_mapping.items():
+                key = int(response_key) if isinstance(response_key, str) else response_key
+                if key == first_byte:
+                    return mode_name
 
         _LOGGER.warning("Unknown fan mode response: %s", output)
         return None
@@ -142,7 +152,8 @@ class IpmiClient:
         if not commands:
             raise IpmiConnectionError(f"No commands configured for fan mode '{mode}'")
 
-        for cmd in commands:
+        total = len(commands)
+        for index, cmd in enumerate(commands, start=1):
             netfn = cmd["netfn"]
             command = cmd["command"]
             data = cmd.get("data", [])
@@ -153,7 +164,13 @@ class IpmiClient:
                 "privilege": "ADMINISTRATOR",
                 "command": raw_str,
             }
-            await self._request("POST", "/api/raw", body)
+            try:
+                await self._request("POST", "/api/raw", body)
+            except IpmiConnectionError as err:
+                raise IpmiConnectionError(
+                    f"Fan mode '{mode}' failed on command {index} of {total} "
+                    f"(mode may be partially applied): {err}"
+                ) from err
 
     # --- SDR sensor methods ---
 
@@ -224,7 +241,7 @@ class IpmiClient:
             ) as resp:
                 if resp.status != 200:
                     raise IpmiConnectionError(f"Add-on returned HTTP {resp.status}")
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise IpmiConnectionError(f"Cannot reach IPMI add-on: {err}") from err
 
     @staticmethod
@@ -247,7 +264,7 @@ class IpmiClient:
                 if resp.status != 200:
                     detail = (await resp.json()).get("detail", f"HTTP {resp.status}")
                     raise IpmiConnectionError(detail)
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise IpmiConnectionError(f"Connection test failed: {err}") from err
 
     @staticmethod
@@ -270,5 +287,5 @@ class IpmiClient:
                 if resp.status != 200:
                     detail = (await resp.json()).get("detail", f"HTTP {resp.status}")
                     raise IpmiConnectionError(detail)
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise IpmiConnectionError(f"Admin privilege test failed: {err}") from err

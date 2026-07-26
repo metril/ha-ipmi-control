@@ -11,6 +11,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -20,9 +21,12 @@ from .const import (
     CONF_FAN_MODE_RESPONSE_MAPPING,
     CONF_IPMI_IP,
     CONF_PASSWORD,
+    CONF_POWER_CONTROL,
     CONF_PRIVILEGE_LEVEL,
     CONF_USERNAME,
+    DEFAULT_POWER_CONTROL,
     DOMAIN,
+    migrate_power_control,
 )
 from .coordinator import IpmiDataUpdateCoordinator
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
@@ -44,6 +48,28 @@ SERVICE_FORCE_POWER_OFF_SCHEMA = vol.Schema(
         vol.Required("confirm"): cv.boolean,
     }
 )
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an old config entry to the current version."""
+    _LOGGER.debug("Migrating IPMI Controller entry from version %s", entry.version)
+
+    if entry.version > 3:
+        # This version of the integration cannot migrate an entry that was
+        # created by a newer version.
+        return False
+
+    if entry.version < 3:
+        new_options = dict(entry.options)
+        new_options[CONF_POWER_CONTROL] = migrate_power_control(
+            new_options.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
+        )
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=3
+        )
+
+    _LOGGER.debug("Migration of IPMI Controller entry to version 3 successful")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -97,27 +123,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entity_id = call.data["entity_id"]
             confirm = call.data["confirm"]
 
-            # Find the config entry that owns this entity
-            target_entry_id: str | None = None
-            for eid, edata in hass.data.get(DOMAIN, {}).items():
-                if isinstance(edata, dict) and "client" in edata:
-                    target_entry_id = eid
-                    # Match by checking entity_id against expected pattern
-                    entry_obj = hass.config_entries.async_get_entry(eid)
-                    if entry_obj:
-                        from .const import CONF_HOST_NAME
-                        host_name = entry_obj.data.get(CONF_HOST_NAME, "")
-                        expected_entity = f"button.ipmi_{host_name}_force_hard_off"
-                        if entity_id == expected_entity:
-                            break
-            else:
-                # If no exact match found, use the last one checked
-                pass
-
-            if target_entry_id is None:
+            # Find the config entry that owns this entity via the entity registry
+            registry = er.async_get(hass)
+            entity_entry = registry.async_get(entity_id)
+            if (
+                entity_entry is None
+                or entity_entry.config_entry_id not in hass.data.get(DOMAIN, {})
+            ):
                 raise HomeAssistantError(
                     f"No IPMI config entry found for entity {entity_id}"
                 )
+            target_entry_id = entity_entry.config_entry_id
 
             entry_data = hass.data[DOMAIN][target_entry_id]
             target_client: IpmiClient = entry_data["client"]

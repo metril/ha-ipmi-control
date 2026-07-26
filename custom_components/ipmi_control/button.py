@@ -91,13 +91,15 @@ class IpmiSetThresholdsButton(ButtonEntity):
 
         try:
             await self._client.set_sensor_thresholds(sensors_with_thresholds)
+            await self._coordinator.async_refresh_thresholds()
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
+        except Exception as err:
+            raise HomeAssistantError(str(err)) from err
 
-        await self._coordinator.async_refresh_thresholds()
         _LOGGER.info("Sensor thresholds applied successfully")
 
 
@@ -171,6 +173,8 @@ class IpmiForceHardOffButton(ButtonEntity):
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
+            raise HomeAssistantError(str(err)) from err
+        except Exception as err:
             raise HomeAssistantError(str(err)) from err
 
         entry_data["hard_off_armed"] = False

@@ -120,8 +120,11 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
+        except Exception as err:
+            raise HomeAssistantError(str(err)) from err
 
         self._set_optimistic(True)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the server (soft/ACPI shutdown)."""
@@ -138,8 +141,11 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             raise HomeAssistantError(str(err)) from err
         except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
+        except Exception as err:
+            raise HomeAssistantError(str(err)) from err
 
         self._set_optimistic(False)
+        await self.coordinator.async_request_refresh()
 
     def _set_optimistic(self, state: bool) -> None:
         """Set optimistic state override with configured hold duration."""
@@ -149,7 +155,10 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         if hold > 0:
             self._optimistic_state = state
             self._optimistic_expiry = time.monotonic() + hold
-            self.async_write_ha_state()
+        else:
+            self._optimistic_state = None
+            self._optimistic_expiry = 0
+        self.async_write_ha_state()
 
 
 class IpmiArmHardOffSwitch(SwitchEntity):
