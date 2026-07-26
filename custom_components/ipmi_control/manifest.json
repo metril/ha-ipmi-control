@@ -1,11 +1,13 @@
 {
   "domain": "ipmi_control",
   "name": "IPMI Control",
-  "codeowners": [],
+  "codeowners": ["@metril"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "",
+  "documentation": "https://github.com/metril/ha-ipmi-control",
+  "integration_type": "hub",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/metril/ha-ipmi-control/issues",
   "requirements": [],
-  "version": "3.2.0"
+  "version": "3.3.0"
 }

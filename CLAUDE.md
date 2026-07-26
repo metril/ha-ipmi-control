@@ -3,7 +3,7 @@
 ## Project Overview
 
 Home Assistant custom integration + add-on for IPMI/BMC server management. Single repo serves both:
-- **Integration** (`custom_components/ipmi_controller/`) — HA config flow, entities, coordinator
+- **Integration** (`custom_components/ipmi_control/`) — HA config flow, entities, coordinator
 - **Add-on** (`ipmi_control/`) — Docker container running FastAPI + ipmitool
 
 GitHub: https://github.com/metril/ha-ipmi-control
@@ -23,11 +23,11 @@ HA Core (integration) --HTTP--> Add-on (FastAPI + ipmitool) --IPMI--> BMC
 
 | File | Purpose |
 |------|---------|
-| `custom_components/ipmi_controller/ipmi.py` | Async HTTP client to add-on API |
-| `custom_components/ipmi_controller/coordinator.py` | DataUpdateCoordinator, polling-based |
-| `custom_components/ipmi_controller/config_flow.py` | Multi-step config flow + options flow |
-| `custom_components/ipmi_controller/const.py` | Motherboard profiles, constants |
-| `custom_components/ipmi_controller/select.py` | Fan mode select with virtual mode mapping |
+| `custom_components/ipmi_control/ipmi.py` | Async HTTP client to add-on API |
+| `custom_components/ipmi_control/coordinator.py` | DataUpdateCoordinator, polling-based |
+| `custom_components/ipmi_control/config_flow.py` | Multi-step config flow + options flow |
+| `custom_components/ipmi_control/const.py` | Motherboard profiles, constants |
+| `custom_components/ipmi_control/select.py` | Fan mode select with virtual mode mapping |
 | `ipmi_control/app/main.py` | FastAPI endpoints wrapping ipmitool |
 | `ipmi_control/app/ipmi.py` | Async subprocess wrapper for ipmitool |
 
@@ -45,7 +45,9 @@ HA Core (integration) --HTTP--> Add-on (FastAPI + ipmitool) --IPMI--> BMC
 pyghmi has a bug in `session.py` where `logoutexpiry` can be `None`, causing `TypeError` during BMC communication with Supermicro boards. The add-on uses proven `ipmitool` binary instead.
 
 ### Fan mode commands
-Stored as structured dicts with `netfn`, `command`, `data` byte arrays in const.py. The integration converts these to `raw 0xNN 0xNN ...` strings for ipmitool. Multi-command modes (like metis quiet) execute commands sequentially.
+Stored as structured dicts with `netfn`, `command`, `data` byte arrays in const.py. The integration converts these to `raw 0xNN 0xNN ...` strings for ipmitool.
+
+Users can define **virtual fan modes** in the options flow — modes the BMC has no concept of, built from a multi-command raw sequence. `virtual_maps_to` records which real mode the BMC reports on readback. A virtual mode must be written to all four of `fan_modes`, `fan_mode_display_mapping`, `fan_mode_commands`, and `virtual_mode_mapping` or it won't work end to end. Multi-command sequences execute sequentially; a mid-sequence failure reports which command index failed.
 
 ### Fan sensor discovery
 Add-on queries BMC SDR via `ipmitool sdr type Fan`. Config flow shows discovered fans as multi-select + manual entry fallback. SDR query can fail — always show the fan config step with manual entry.
@@ -63,8 +65,8 @@ Two privilege levels per host: Operator (chassis power) and Administrator (fan c
 ## CI/CD
 
 - `.github/workflows/addon-build.yml` — builds Docker on `addon-v*` tags
-- `.github/workflows/release.yml` — auto-creates releases on `v*` or `addon-v*` tags
-- Tags: `v*` for integration, `addon-v*` for add-on
+- `.github/workflows/release.yml` — auto-creates GitHub releases on `v*` tags only
+- Tags: `v*` for integration (triggers a GitHub release), `addon-v*` for add-on (triggers the Docker build only, no GitHub release)
 
 ## Common Gotchas
 

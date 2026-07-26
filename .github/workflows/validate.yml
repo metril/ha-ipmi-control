@@ -1,0 +1,55 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Hassfest validation
+        # Intentionally floating (not SHA-pinned): hassfest validates against
+        # HA's current schema/rules, and pinning risks silently missing new
+        # validation checks. This is the officially documented usage.
+        uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: HACS validation
+        # Intentionally floating (not SHA-pinned): same rationale as
+        # hassfest above — hacs/action's own docs recommend @main so it
+        # always validates against current HACS requirements.
+        uses: hacs/action@main
+        with:
+          category: "integration"
+
+  addon-lint:
+    name: Add-on config lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint add-on config
+        uses: frenck/action-addon-linter@f995494fd84fae6310d23617e66d0e37de4f14eb # v2.21.0
+        with:
+          path: "./ipmi_control"
