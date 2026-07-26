@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 DOMAIN = "ipmi_control"
 
 # Config entry data keys
@@ -49,6 +51,20 @@ DEFAULT_POWER_CONTROL = [POWER_ON, POWER_SOFT_OFF]
 CONF_POWER_STATE_HOLD = "power_state_hold"
 DEFAULT_POWER_STATE_HOLD = 60
 
+
+def migrate_power_control(value: Any) -> list[str]:
+    """Migrate old string power_control values to the new list format."""
+    if isinstance(value, list):
+        return value
+    # Old format: "both", "on", "off", "none"
+    mapping = {
+        "both": [POWER_ON, POWER_SOFT_OFF],
+        "on": [POWER_ON],
+        "off": [POWER_SOFT_OFF],
+        "none": [],
+    }
+    return mapping.get(value, DEFAULT_POWER_CONTROL)
+
 # Motherboard profiles
 MOTHERBOARD_NONE = "none"
 
@@ -79,16 +95,4 @@ MOTHERBOARD_PROFILES: dict[str, dict] = {
             "heavy_io": [{"netfn": 0x30, "command": 0x45, "data": [0x01, 0x04]}],
         },
     },
-}
-
-# Metis-specific quiet mode extension (on top of supermicro profile)
-METIS_QUIET_MODE = {
-    "mode_name": "quiet",
-    "display_name": "Quiet",
-    "virtual_maps_to": "standard",
-    "commands": [
-        {"netfn": 0x30, "command": 0x45, "data": [0x01, 0x00]},
-        {"netfn": 0x30, "command": 0x70, "data": [0x66, 0x01, 0x00, 0x32]},
-        {"netfn": 0x30, "command": 0x70, "data": [0x66, 0x01, 0x01, 0x32]},
-    ],
 }

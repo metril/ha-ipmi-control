@@ -92,7 +92,12 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     async def async_refresh_thresholds(self) -> None:
-        """Fetch sensor thresholds from BMC and update stored data."""
+        """Fetch sensor thresholds from BMC and update stored data.
+
+        Raises:
+            IpmiConnectionError: If the BMC cannot be reached or the request
+                fails. Callers must not swallow this silently.
+        """
         sensors = self.entry.options.get(CONF_SENSORS, [])
         if not sensors or self.data is None:
             return
@@ -105,3 +110,4 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryAuthFailed(str(err)) from err
         except IpmiConnectionError as err:
             _LOGGER.error("Failed to refresh thresholds: %s", err)
+            raise

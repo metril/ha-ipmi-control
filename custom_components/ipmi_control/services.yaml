@@ -1,0 +1,22 @@
+force_power_off:
+  name: Force power off
+  description: >-
+    Immediately cut power to an IPMI host (hard power off), bypassing a
+    graceful shutdown. Requires the host to be armed first via its
+    "Power Off (Arm)" switch, unless confirm is set to true.
+  fields:
+    entity_id:
+      name: Entity
+      description: The force power off button entity of the target host.
+      required: true
+      selector:
+        entity:
+          domain: button
+    confirm:
+      name: Confirm
+      description: >-
+        Set to true to execute immediately without requiring the host to be
+        pre-armed via its "Power Off (Arm)" switch.
+      required: true
+      selector:
+        boolean:
