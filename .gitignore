@@ -7,3 +7,6 @@ sample_output.txt
 
 # Local scratch: handoff notes and ad-hoc verification scripts
 .dev/
+
+# Local-only project notes
+CLAUDE.md
