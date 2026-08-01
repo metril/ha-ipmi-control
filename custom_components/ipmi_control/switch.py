@@ -20,6 +20,7 @@ from .const import (
     CONF_HOST_NAME,
     CONF_POWER_CONTROL,
     CONF_POWER_STATE_HOLD,
+    CONF_PRIVILEGE_LEVEL,
     DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_POWER_STATE_HOLD,
@@ -53,6 +54,11 @@ async def async_setup_entry(
 
     if POWER_HARD_OFF in policy:
         entities.append(IpmiArmHardOffSwitch(hass, entry))
+
+    # BMC cold reset is an Administrator operation, like fan control and
+    # threshold writes. Operator entries never get the entity pair.
+    if entry.data.get(CONF_PRIVILEGE_LEVEL) == "ADMINISTRATOR":
+        entities.append(IpmiArmBmcResetSwitch(hass, entry))
 
     if entities:
         async_add_entities(entities)
@@ -161,12 +167,18 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         self.async_write_ha_state()
 
 
-class IpmiArmHardOffSwitch(SwitchEntity):
-    """Toggle that arms the force power off capability."""
+class IpmiArmSwitch(SwitchEntity):
+    """Toggle that arms a destructive action for a short window.
+
+    Subclasses supply the hass.data flag they own and their own identity. The
+    flag is read live from hass.data rather than mirrored on the entity so the
+    button, the arm switch, and the domain services always agree on the state.
+    """
 
     _attr_has_entity_name = True
-    _attr_name = "Power Off (Arm)"
-    _attr_icon = "mdi:shield-alert"
+
+    _arm_key: str
+    _unique_id_suffix: str
 
     def __init__(
         self,
@@ -178,7 +190,7 @@ class IpmiArmHardOffSwitch(SwitchEntity):
         self._entry = entry
         self._disarm_cancel: CALLBACK_TYPE | None = None
         host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_arm_hard_off"
+        self._attr_unique_id = f"ipmi_{host_name}_{self._unique_id_suffix}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, host_name)},
             name=f"IPMI {host_name.title()}",
@@ -187,14 +199,12 @@ class IpmiArmHardOffSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return whether hard power off is armed."""
-        return self._hass.data[DOMAIN][self._entry.entry_id].get(
-            "hard_off_armed", False
-        )
+        """Return whether the action is armed."""
+        return self._hass.data[DOMAIN][self._entry.entry_id].get(self._arm_key, False)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Arm the force power off."""
-        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = True
+        """Arm the action."""
+        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = True
 
         # Cancel any existing disarm timer
         if self._disarm_cancel is not None:
@@ -209,12 +219,12 @@ class IpmiArmHardOffSwitch(SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disarm the force power off."""
+        """Disarm the action."""
         self._disarm(write_state=True)
 
     def _disarm(self, write_state: bool = False) -> None:
         """Disarm and cancel the timer."""
-        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = False
+        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = False
         if self._disarm_cancel is not None:
             self._disarm_cancel()
             self._disarm_cancel = None
@@ -224,7 +234,7 @@ class IpmiArmHardOffSwitch(SwitchEntity):
     def _auto_disarm(self, _now: Any) -> None:
         """Auto-disarm callback after timeout."""
         self._disarm_cancel = None
-        self._hass.data[DOMAIN][self._entry.entry_id]["hard_off_armed"] = False
+        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = False
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -232,3 +242,21 @@ class IpmiArmHardOffSwitch(SwitchEntity):
         if self._disarm_cancel is not None:
             self._disarm_cancel()
             self._disarm_cancel = None
+
+
+class IpmiArmHardOffSwitch(IpmiArmSwitch):
+    """Toggle that arms the force power off capability."""
+
+    _attr_name = "Power Off (Arm)"
+    _attr_icon = "mdi:shield-alert"
+    _arm_key = "hard_off_armed"
+    _unique_id_suffix = "arm_hard_off"
+
+
+class IpmiArmBmcResetSwitch(IpmiArmSwitch):
+    """Toggle that arms the BMC cold reset capability."""
+
+    _attr_name = "BMC Reset (Arm)"
+    _attr_icon = "mdi:restart-alert"
+    _arm_key = "bmc_reset_armed"
+    _unique_id_suffix = "arm_bmc_reset"

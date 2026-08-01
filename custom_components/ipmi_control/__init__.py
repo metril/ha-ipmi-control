@@ -14,6 +14,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .button import async_execute_bmc_cold_reset
 from .const import (
     CONF_ADDON_URL,
     CONF_FAN_MODE_COMMANDS,
@@ -43,12 +44,36 @@ PLATFORMS = [
 ]
 
 SERVICE_FORCE_POWER_OFF = "force_power_off"
-SERVICE_FORCE_POWER_OFF_SCHEMA = vol.Schema(
+SERVICE_BMC_COLD_RESET = "bmc_cold_reset"
+
+# Both destructive services take the same shape: the button entity that
+# identifies the host, and a confirm flag that bypasses the arm switch.
+DESTRUCTIVE_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.string,
         vol.Required("confirm"): cv.boolean,
     }
 )
+SERVICE_FORCE_POWER_OFF_SCHEMA = DESTRUCTIVE_SERVICE_SCHEMA
+
+
+def _entry_for_entity(
+    hass: HomeAssistant, entity_id: str
+) -> tuple[ConfigEntry, dict]:
+    """Resolve the IPMI config entry (and its runtime data) owning an entity."""
+    registry = er.async_get(hass)
+    entity_entry = registry.async_get(entity_id)
+    if (
+        entity_entry is None
+        or entity_entry.config_entry_id not in hass.data.get(DOMAIN, {})
+    ):
+        raise HomeAssistantError(f"No IPMI config entry found for entity {entity_id}")
+
+    entry = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+    if entry is None:
+        raise HomeAssistantError(f"No IPMI config entry found for entity {entity_id}")
+
+    return entry, hass.data[DOMAIN][entity_entry.config_entry_id]
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -112,6 +137,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "client": client,
         "hard_off_armed": False,
+        "bmc_reset_armed": False,
+        # monotonic deadline; while in the future the coordinator treats
+        # connection failures as the BMC rebooting rather than as errors
+        "bmc_reset_grace_until": 0.0,
         # Snapshot taken after the first refresh, so units the coordinator just
         # learned are already baked in and do not read as a user-made change.
         "options_fingerprint": _options_fingerprint(entry),
@@ -124,22 +153,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_FORCE_POWER_OFF):
         async def handle_force_power_off(call: ServiceCall) -> None:
             """Handle the force_power_off service call."""
-            entity_id = call.data["entity_id"]
             confirm = call.data["confirm"]
-
-            # Find the config entry that owns this entity via the entity registry
-            registry = er.async_get(hass)
-            entity_entry = registry.async_get(entity_id)
-            if (
-                entity_entry is None
-                or entity_entry.config_entry_id not in hass.data.get(DOMAIN, {})
-            ):
-                raise HomeAssistantError(
-                    f"No IPMI config entry found for entity {entity_id}"
-                )
-            target_entry_id = entity_entry.config_entry_id
-
-            entry_data = hass.data[DOMAIN][target_entry_id]
+            _target_entry, entry_data = _entry_for_entity(hass, call.data["entity_id"])
             target_client: IpmiClient = entry_data["client"]
 
             if confirm:
@@ -167,6 +182,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_FORCE_POWER_OFF,
             handle_force_power_off,
             schema=SERVICE_FORCE_POWER_OFF_SCHEMA,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_BMC_COLD_RESET):
+        async def handle_bmc_cold_reset(call: ServiceCall) -> None:
+            """Handle the bmc_cold_reset service call."""
+            confirm = call.data["confirm"]
+            target_entry, entry_data = _entry_for_entity(
+                hass, call.data["entity_id"]
+            )
+
+            # The entity-level gate is privilege, so the service must enforce it
+            # too — otherwise a service call is a way around it.
+            if target_entry.data.get(CONF_PRIVILEGE_LEVEL) != "ADMINISTRATOR":
+                raise HomeAssistantError(
+                    "BMC cold reset requires Administrator credentials"
+                )
+
+            if confirm:
+                entry_data["bmc_reset_armed"] = True
+
+            await async_execute_bmc_cold_reset(
+                hass, target_entry, entry_data["client"]
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_BMC_COLD_RESET,
+            handle_bmc_cold_reset,
+            schema=DESTRUCTIVE_SERVICE_SCHEMA,
         )
 
     return True
@@ -210,7 +254,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
-        # Unregister service if no more entries
+        # Unregister services if no more entries
         if not hass.data.get(DOMAIN):
             hass.services.async_remove(DOMAIN, SERVICE_FORCE_POWER_OFF)
+            hass.services.async_remove(DOMAIN, SERVICE_BMC_COLD_RESET)
     return unload_ok

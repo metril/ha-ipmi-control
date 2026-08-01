@@ -18,6 +18,23 @@ class IpmiAuthError(Exception):
     """Raised when IPMI authentication fails."""
 
 
+async def _error_detail(resp: aiohttp.ClientResponse, fallback: str) -> str:
+    """Pull the "detail" field out of an error response body.
+
+    An add-on error that escapes FastAPI's exception handlers (an uncaught
+    TimeoutError, say) comes back as a 500 with no JSON body at all, so decoding
+    it is not guaranteed to work. Fall back to the status line rather than
+    letting a decode failure mask the original error.
+    """
+    try:
+        body = await resp.json()
+    except Exception:  # noqa: BLE001 - any decode failure means "no detail"
+        return fallback
+    if isinstance(body, dict):
+        return body.get("detail") or fallback
+    return fallback
+
+
 class IpmiClient:
     """Client that communicates with the IPMI Control add-on via HTTP."""
 
@@ -64,11 +81,16 @@ class IpmiClient:
                 timeout=aiohttp.ClientTimeout(total=20),
             ) as resp:
                 if resp.status == 401:
-                    detail = (await resp.json()).get("detail", "Auth failed")
-                    raise IpmiAuthError(detail)
+                    raise IpmiAuthError(await _error_detail(resp, "Auth failed"))
+                if resp.status == 404:
+                    raise IpmiConnectionError(
+                        f"Add-on does not provide {path}. Update the IPMI Control "
+                        "add-on to 2.6.0 or later."
+                    )
                 if resp.status != 200:
-                    detail = (await resp.json()).get("detail", f"HTTP {resp.status}")
-                    raise IpmiConnectionError(detail)
+                    raise IpmiConnectionError(
+                        await _error_detail(resp, f"HTTP {resp.status}")
+                    )
                 return await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
             raise IpmiConnectionError(
@@ -104,6 +126,16 @@ class IpmiClient:
         """Send hard (immediate) power off command."""
         body = {**self._auth_body(), "action": "off"}
         await self._request("POST", "/api/chassis/power", body)
+
+    async def bmc_cold_reset(self) -> None:
+        """Cold reset the BMC itself.
+
+        The BMC drops every IPMI session and is unreachable for roughly a minute
+        afterwards; callers are responsible for suppressing the resulting
+        connection failures.
+        """
+        body = {**self._auth_body(), "action": "cold"}
+        await self._request("POST", "/api/mc/reset", body)
 
     async def get_fan_mode(self) -> str | None:
         """Query current fan mode using configured raw command."""

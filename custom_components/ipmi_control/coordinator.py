@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,7 +15,13 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .const import CONF_HOST_NAME, CONF_SCAN_INTERVAL, CONF_SENSORS, DEFAULT_SCAN_INTERVAL
+from .const import (
+    CONF_HOST_NAME,
+    CONF_SCAN_INTERVAL,
+    CONF_SENSORS,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +49,40 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=scan_interval),
         )
 
+    def _in_bmc_reset_grace(self) -> bool:
+        """Return True while a recent BMC cold reset is still expected to bite."""
+        data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
+        return time.monotonic() < data.get("bmc_reset_grace_until", 0.0)
+
     async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch data from IPMI, tolerating a BMC that is mid-reset.
+
+        Polling continues at the normal interval throughout the grace window;
+        only the classification of connection failures changes, so entities hold
+        their last known state instead of flapping to unavailable while the BMC
+        reboots. The window ends on its own once a poll succeeds.
+        """
+        try:
+            return await self._fetch_data()
+        except UpdateFailed as err:
+            if not self._in_bmc_reset_grace():
+                raise
+            # ConfigEntryAuthFailed is not an UpdateFailed and is deliberately
+            # not caught here: a rebooting BMC does not produce auth errors, and
+            # swallowing them would break reauth.
+            _LOGGER.debug(
+                "Ignoring IPMI poll failure during BMC reset grace window: %s", err
+            )
+            if self.data is not None:
+                return self.data
+            return {
+                "power": None,
+                "fan_mode": None,
+                "sensor_thresholds": {},
+                "sensor_readings": {},
+            }
+
+    async def _fetch_data(self) -> dict[str, Any]:
         """Fetch data from IPMI via add-on."""
         try:
             power_state = await self.client.get_chassis_status()

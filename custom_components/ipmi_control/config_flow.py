@@ -32,6 +32,7 @@ from .const import (
     CONF_FAN_MODE_QUERY_COMMAND,
     CONF_FAN_MODE_RESPONSE_MAPPING,
     CONF_FAN_MODES,
+    CONF_BMC_RESET_GRACE,
     CONF_HARD_OFF_DISARM_TIMEOUT,
     CONF_HOST_NAME,
     CONF_IPMI_IP,
@@ -51,6 +52,7 @@ from .const import (
     CONF_THRESHOLD_SENSORS,
     CONF_USERNAME,
     CONF_VIRTUAL_MODE_MAPPING,
+    DEFAULT_BMC_RESET_GRACE,
     DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_SCAN_INTERVAL,
@@ -325,6 +327,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
             self._options[CONF_POWER_STATE_HOLD] = user_input[CONF_POWER_STATE_HOLD]
             self._options[CONF_HARD_OFF_DISARM_TIMEOUT] = user_input[CONF_HARD_OFF_DISARM_TIMEOUT]
+            self._options[CONF_BMC_RESET_GRACE] = user_input[CONF_BMC_RESET_GRACE]
             return await self.async_step_fan_profile()
 
         return self.async_show_form(
@@ -349,6 +352,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_HARD_OFF_DISARM_TIMEOUT, default=DEFAULT_HARD_OFF_DISARM_TIMEOUT
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_BMC_RESET_GRACE, default=DEFAULT_BMC_RESET_GRACE
+                    ): vol.All(int, vol.Range(min=30, max=300)),
                 }
             ),
         )
@@ -730,6 +736,10 @@ class IpmiControllerOptionsFlow(OptionsFlow):
                         CONF_HARD_OFF_DISARM_TIMEOUT,
                         default=current_opts.get(CONF_HARD_OFF_DISARM_TIMEOUT, DEFAULT_HARD_OFF_DISARM_TIMEOUT),
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_BMC_RESET_GRACE,
+                        default=current_opts.get(CONF_BMC_RESET_GRACE, DEFAULT_BMC_RESET_GRACE),
+                    ): vol.All(int, vol.Range(min=30, max=300)),
                     vol.Required(
                         CONF_MOTHERBOARD,
                         default=current_opts.get(CONF_MOTHERBOARD, MOTHERBOARD_NONE),

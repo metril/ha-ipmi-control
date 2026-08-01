@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -13,10 +14,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    CONF_BMC_RESET_GRACE,
     CONF_HOST_NAME,
     CONF_POWER_CONTROL,
     CONF_PRIVILEGE_LEVEL,
     CONF_SENSORS,
+    DEFAULT_BMC_RESET_GRACE,
     DEFAULT_POWER_CONTROL,
     DOMAIN,
     POWER_HARD_OFF,
@@ -25,6 +28,43 @@ from .coordinator import IpmiDataUpdateCoordinator
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_execute_bmc_cold_reset(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: IpmiClient,
+) -> None:
+    """Cold reset the BMC, if armed, and open the post-reset grace window.
+
+    Shared by the button and the bmc_cold_reset service so both enforce the arm
+    gate identically and both start the grace period the coordinator relies on.
+    Callers that legitimately bypass the arm gate (the service's confirm: true
+    path) set the flag themselves before calling.
+    """
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    if not entry_data.get("bmc_reset_armed", False):
+        raise HomeAssistantError("BMC cold reset is not armed")
+
+    try:
+        await client.bmc_cold_reset()
+    except IpmiAuthError as err:
+        entry.async_start_reauth(hass)
+        raise HomeAssistantError(str(err)) from err
+    except IpmiConnectionError as err:
+        raise HomeAssistantError(str(err)) from err
+    except Exception as err:
+        raise HomeAssistantError(str(err)) from err
+    finally:
+        entry_data["bmc_reset_armed"] = False
+
+    grace = entry.options.get(CONF_BMC_RESET_GRACE, DEFAULT_BMC_RESET_GRACE)
+    entry_data["bmc_reset_grace_until"] = time.monotonic() + grace
+    _LOGGER.info(
+        "BMC cold reset issued for %s; tolerating connection failures for %ss",
+        entry.data[CONF_HOST_NAME],
+        grace,
+    )
 
 
 async def async_setup_entry(
@@ -51,6 +91,9 @@ async def async_setup_entry(
 
     if POWER_HARD_OFF in policy:
         entities.append(IpmiForceHardOffButton(hass, entry, client))
+
+    if privilege == "ADMINISTRATOR":
+        entities.append(IpmiBmcColdResetButton(hass, entry, client))
 
     if entities:
         async_add_entities(entities)
@@ -179,3 +222,33 @@ class IpmiForceHardOffButton(ButtonEntity):
 
         entry_data["hard_off_armed"] = False
         _LOGGER.info("Hard power off executed")
+
+
+class IpmiBmcColdResetButton(ButtonEntity):
+    """Button to cold reset the BMC itself (requires arming first)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "BMC Cold Reset"
+    _attr_icon = "mdi:restart-alert"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: IpmiClient,
+    ) -> None:
+        """Initialize the BMC cold reset button."""
+        self._hass = hass
+        self._client = client
+        self._entry = entry
+        host_name = entry.data[CONF_HOST_NAME]
+        self._attr_unique_id = f"ipmi_{host_name}_bmc_cold_reset"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host_name)},
+            name=f"IPMI {host_name.title()}",
+            manufacturer="IPMI",
+        )
+
+    async def async_press(self) -> None:
+        """Cold reset the BMC if armed."""
+        await async_execute_bmc_cold_reset(self._hass, self._entry, self._client)

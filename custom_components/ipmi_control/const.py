@@ -41,9 +41,14 @@ POWER_ON = "on"
 POWER_SOFT_OFF = "soft_off"
 POWER_HARD_OFF = "hard_off"
 
-# Hard power off safety gate
+# Shared auto-disarm timeout for the force actions (hard power off, BMC cold reset)
 CONF_HARD_OFF_DISARM_TIMEOUT = "hard_off_disarm_timeout"
 DEFAULT_HARD_OFF_DISARM_TIMEOUT = 30
+
+# How long after a BMC cold reset connection failures are treated as expected
+# rather than reported as errors. The BMC is unreachable while it reboots.
+CONF_BMC_RESET_GRACE = "bmc_reset_grace"
+DEFAULT_BMC_RESET_GRACE = 90
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 10

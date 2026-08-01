@@ -27,13 +27,15 @@
           "power_control": "Allowed power operations",
           "scan_interval": "Poll interval (seconds)",
           "power_state_hold": "Grace period after power commands (seconds)",
-          "hard_off_disarm_timeout": "Hard power off auto-disarm timeout (seconds)"
+          "hard_off_disarm_timeout": "Force-action auto-disarm timeout (seconds)",
+          "bmc_reset_grace": "BMC reset grace period (seconds)"
         },
         "data_description": {
           "power_control": "Select which power operations are allowed for this host",
           "scan_interval": "How often to poll the BMC for state changes (5-300 seconds)",
           "power_state_hold": "How long to hold the expected state after a power command (0 to disable)",
-          "hard_off_disarm_timeout": "How long the hard power off stays armed before auto-disarming (5-300 seconds)"
+          "hard_off_disarm_timeout": "How long hard power off and BMC cold reset stay armed before auto-disarming (5-300 seconds)",
+          "bmc_reset_grace": "How long connection failures are tolerated after a BMC cold reset before being reported as errors (30-300 seconds). BMC cold reset requires Administrator credentials and leaves the BMC unreachable for about a minute."
         }
       },
       "fan_profile": {
@@ -104,12 +106,14 @@
           "power_control": "Allowed power operations",
           "scan_interval": "Poll interval (seconds)",
           "power_state_hold": "Grace period after power commands (seconds)",
-          "hard_off_disarm_timeout": "Hard power off auto-disarm timeout (seconds)",
+          "hard_off_disarm_timeout": "Force-action auto-disarm timeout (seconds)",
+          "bmc_reset_grace": "BMC reset grace period (seconds)",
           "motherboard": "Motherboard profile"
         },
         "data_description": {
           "power_control": "Select which power operations are allowed for this host",
-          "hard_off_disarm_timeout": "How long the hard power off stays armed before auto-disarming (5-300 seconds)"
+          "hard_off_disarm_timeout": "How long hard power off and BMC cold reset stay armed before auto-disarming (5-300 seconds)",
+          "bmc_reset_grace": "How long connection failures are tolerated after a BMC cold reset before being reported as errors (30-300 seconds). BMC cold reset requires Administrator credentials and leaves the BMC unreachable for about a minute."
         }
       },
       "virtual_modes": {
@@ -189,6 +193,20 @@
         "confirm": {
           "name": "Confirm",
           "description": "Set to true to execute immediately without requiring the host to be pre-armed via its \"Power Off (Arm)\" switch."
+        }
+      }
+    },
+    "bmc_cold_reset": {
+      "name": "BMC cold reset",
+      "description": "Reboot the BMC (baseboard management controller) itself, leaving the server powered as-is. Requires Administrator credentials, and requires the host to be armed first via its \"BMC Reset (Arm)\" switch unless confirm is set to true. The BMC drops all IPMI sessions and is unreachable for roughly a minute afterwards.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The BMC cold reset button entity of the target host."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Set to true to execute immediately without requiring the host to be pre-armed via its \"BMC Reset (Arm)\" switch."
         }
       }
     }

@@ -13,7 +13,7 @@ from .ipmi import is_auth_error, run_ipmitool
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IPMI Control", version="2.4.0")
+app = FastAPI(title="IPMI Control", version="2.6.0")
 
 # Only the documented raw-byte form is allowed, e.g. "raw 0x30 0x45 0x00".
 # Prevents argument injection into ipmitool via the /api/raw command field.
@@ -35,6 +35,10 @@ class ChassisStatusRequest(IpmiCredentials):
 
 class ChassisPowerRequest(IpmiCredentials):
     action: str  # "on" or "soft"
+
+
+class McResetRequest(IpmiCredentials):
+    action: str  # "cold" only
 
 
 class RawCommandRequest(IpmiCredentials):
@@ -182,6 +186,33 @@ async def chassis_power(req: ChassisPowerRequest):
         req.host, req.user, req.password, "OPERATOR",
         "chassis", "power", req.action,
     )
+    _check_error(stderr, rc)
+    return {"ok": True}
+
+
+@app.post("/api/mc/reset")
+async def mc_reset(req: McResetRequest):
+    """Reset the BMC itself. Administrator only, cold reset only."""
+    if req.action != "cold":
+        raise HTTPException(status_code=400, detail=f"Invalid action: {req.action}")
+
+    try:
+        stdout, stderr, rc = await run_ipmitool(
+            req.host, req.user, req.password, "ADMINISTRATOR",
+            "mc", "reset", "cold",
+        )
+    except TimeoutError:
+        # Many BMCs tear down the session as part of the reset rather than
+        # acknowledging the command, so a timeout here means the reset almost
+        # certainly landed. This reinterpretation is correct only for this
+        # endpoint — everywhere else a timeout is a genuine failure.
+        logger.warning(
+            "ipmitool timed out during BMC cold reset of %s; the BMC most likely "
+            "dropped the session while resetting",
+            req.host,
+        )
+        return {"ok": True, "timed_out": True}
+
     _check_error(stderr, rc)
     return {"ok": True}
 

@@ -12,6 +12,7 @@ A Home Assistant custom integration + add-on to manage server power, fan control
 - **General Sensor Support** — Expose any BMC sensor (temperature, voltage, fan speed, power, current) with automatic device class mapping
 - **Fan Mode Control** — Switch between fan modes (Standard, Full, Optimum, Heavy IO, custom/virtual modes) on Supermicro boards
 - **Sensor Thresholds** — View and configure thresholds for any sensor, applied via button press
+- **BMC Cold Reset** — Reboot a wedged BMC without touching the server's power (Administrator only, arm-then-press)
 - **Single Credential Model** — One username/password with privilege level selection (Administrator or Operator)
 - **Per-Host Serialization** — BMC requests are serialized per-host to prevent session conflicts
 - **On-Demand Threshold Refresh** — Thresholds fetched once on startup, refreshed via diagnostic button
@@ -79,7 +80,39 @@ Select which BMC sensors to expose in Home Assistant. All sensor types are suppo
 | Fan Mode | Select | Switch between configured fan modes (Administrator only) |
 | Set Sensor Thresholds | Button | Apply configured threshold overrides to the BMC (Administrator only) |
 | Refresh Sensor Thresholds | Button | Re-read current thresholds from the BMC (diagnostic) |
+| BMC Reset (Arm) | Switch | Arms the BMC cold reset for a short window (Administrator only) |
+| BMC Cold Reset | Button | Reboots the BMC itself; refuses unless armed (Administrator only) |
 | *Per-sensor* | Sensor | Temperature (°C/°F/K), voltage (V), fan speed (rpm), power (W), current (A), percent, frequency (Hz) |
+
+### BMC cold reset
+
+When a BMC wedges — SDR queries hang, the web UI stops responding, fan commands are
+ignored — a cold reset reboots the management controller without touching the server's
+power state. The running OS is unaffected.
+
+It is destructive enough to be gated twice:
+
+1. **Administrator credentials.** Operator entries never get the entities at all, the same
+   way they never get the Fan Mode select.
+2. **Arm, then press.** Turn on **BMC Reset (Arm)**, then press **BMC Cold Reset** within
+   the auto-disarm timeout (default 30 s). Pressing while unarmed raises an error instead
+   of resetting anything.
+
+The BMC drops every IPMI session and is unreachable for roughly a minute afterwards. The
+integration expects this: for the configured **BMC reset grace period** (default 90 s) it
+keeps polling but treats connection failures as normal, so entities hold their last known
+state instead of flapping to unavailable and the log stays quiet. The window closes as
+soon as a poll succeeds.
+
+For automations, the `ipmi_control.bmc_cold_reset` action takes the button's `entity_id`
+plus `confirm`. `confirm: true` skips the arm switch:
+
+```yaml
+action: ipmi_control.bmc_cold_reset
+data:
+  entity_id: button.ipmi_node7_bmc_cold_reset
+  confirm: true
+```
 
 ### Sensor attributes
 
@@ -102,8 +135,8 @@ Unrecognized unit strings are passed through to Home Assistant verbatim with no 
 
 ## Privilege Levels
 
-- **Administrator** — Full access: power control, fan mode, sensor reading, threshold setting
-- **Operator** — Read-only: power control, sensor reading. Fan mode select and threshold buttons are not created.
+- **Administrator** — Full access: power control, fan mode, sensor reading, threshold setting, BMC cold reset
+- **Operator** — Power control and sensor reading. Fan mode select, threshold buttons, and the BMC cold reset entities are not created.
 
 ## Virtual Fan Modes
 
