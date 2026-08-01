@@ -138,6 +138,22 @@ def _build_profile_options(
     }
 
 
+def _sensor_option_label(sensor: dict[str, str]) -> str:
+    """Build the picker label for a discovered SDR sensor.
+
+    Shows the unit when the BMC reported one. Sensors sitting at "ns" report nothing
+    at all — typically unpopulated DIMM slots or absent drive bays — so they are
+    called out rather than silently offered as ordinary choices.
+    """
+    name = sensor["name"]
+    unit = sensor.get("unit")
+    if unit:
+        return f"{name} ({unit})"
+    if sensor.get("status") == "ns":
+        return f"{name} (no reading)"
+    return name
+
+
 def _format_virtual_mode_commands(commands: list[dict[str, Any]]) -> str:
     """Format parsed IPMI command dicts back into raw hex text for editing."""
     lines = []
@@ -409,7 +425,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if sdr_sensors:
             sensor_options = [
-                SelectOptionDict(value=s["name"], label=f"{s['name']} ({s['unit']})" if s["unit"] else s["name"])
+                SelectOptionDict(value=s["name"], label=_sensor_option_label(s))
                 for s in sdr_sensors
             ]
             schema_fields[vol.Optional(CONF_SELECTED_SENSORS)] = SelectSelector(
@@ -993,7 +1009,7 @@ class IpmiControllerOptionsFlow(OptionsFlow):
             default_selection = [n for n in current_sensor_names if any(s["name"] == n for s in sdr_sensors)]
 
             sensor_options = [
-                SelectOptionDict(value=s["name"], label=f"{s['name']} ({s['unit']})" if s["unit"] else s["name"])
+                SelectOptionDict(value=s["name"], label=_sensor_option_label(s))
                 for s in sdr_sensors
             ]
             schema_fields[vol.Optional(

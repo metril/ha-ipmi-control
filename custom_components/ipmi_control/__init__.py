@@ -23,6 +23,7 @@ from .const import (
     CONF_PASSWORD,
     CONF_POWER_CONTROL,
     CONF_PRIVILEGE_LEVEL,
+    CONF_SENSORS,
     CONF_USERNAME,
     DEFAULT_POWER_CONTROL,
     DOMAIN,
@@ -111,6 +112,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "client": client,
         "hard_off_armed": False,
+        # Snapshot taken after the first refresh, so units the coordinator just
+        # learned are already baked in and do not read as a user-made change.
+        "options_fingerprint": _options_fingerprint(entry),
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -168,8 +172,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _options_fingerprint(entry: ConfigEntry) -> dict:
+    """Return the entry options with per-sensor units stripped out.
+
+    The coordinator writes units it learns from live readings back into the options.
+    Those writes must not trigger a reload, so they are excluded from the comparison
+    that decides whether a reload is needed.
+    """
+    options = dict(entry.options)
+    sensors = options.get(CONF_SENSORS)
+    if isinstance(sensors, list):
+        options[CONF_SENSORS] = [
+            {k: v for k, v in sensor.items() if k != "unit"}
+            if isinstance(sensor, dict)
+            else sensor
+            for sensor in sensors
+        ]
+    return options
+
+
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update by reloading the entry."""
+    """Reload the entry when options change, ignoring self-healed sensor units."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    fingerprint = _options_fingerprint(entry)
+
+    if entry_data is not None:
+        if entry_data.get("options_fingerprint") == fingerprint:
+            _LOGGER.debug("Options changed only by learned sensor units; not reloading")
+            return
+        entry_data["options_fingerprint"] = fingerprint
+
     await hass.config_entries.async_reload(entry.entry_id)
 
 

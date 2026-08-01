@@ -74,6 +74,8 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except IpmiConnectionError as err:
                 raise UpdateFailed(str(err)) from err
 
+            self._persist_learned_units(sensors, sensor_readings)
+
         # Fetch thresholds on first run only; subsequent refreshes are on-demand
         sensor_thresholds = self.data.get("sensor_thresholds", {}) if self.data else {}
         if not self.data and sensors:
@@ -90,6 +92,41 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "sensor_thresholds": sensor_thresholds,
             "sensor_readings": sensor_readings,
         }
+
+    def _persist_learned_units(
+        self, sensors: list[dict], readings: dict[str, dict]
+    ) -> None:
+        """Write units learned from live readings back into the config entry.
+
+        Units are captured during the config flow, but a sensor that was unreadable
+        at that moment (an idle fan reporting "ns", or one the add-on failed to parse)
+        gets stored with an empty unit and would otherwise keep it forever. Correcting
+        the stored value means the unit is right at entity-init on the next restart,
+        and the options flow shows accurate labels.
+
+        Only ever fills in or corrects a unit from a live non-empty reading; never
+        clears one, so a fan dropping to "ns" does not lose its RPM unit.
+        """
+        updated: list[dict] = []
+        changed = False
+        for sensor in sensors:
+            live_unit = readings.get(sensor["name"], {}).get("unit")
+            if live_unit and live_unit != sensor.get("unit"):
+                updated.append({**sensor, "unit": live_unit})
+                changed = True
+            else:
+                updated.append(sensor)
+
+        if not changed:
+            return
+
+        _LOGGER.debug(
+            "Updating stored SDR units for %s", self.entry.data[CONF_HOST_NAME]
+        )
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, CONF_SENSORS: updated},
+        )
 
     async def async_refresh_thresholds(self) -> None:
         """Fetch sensor thresholds from BMC and update stored data.
