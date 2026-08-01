@@ -48,7 +48,7 @@ DEFAULT_HARD_OFF_DISARM_TIMEOUT = 30
 # How long after a BMC cold reset connection failures are treated as expected
 # rather than reported as errors. The BMC is unreachable while it reboots.
 CONF_BMC_RESET_GRACE = "bmc_reset_grace"
-DEFAULT_BMC_RESET_GRACE = 90
+DEFAULT_BMC_RESET_GRACE = 120
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 10

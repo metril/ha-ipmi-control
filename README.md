@@ -99,7 +99,7 @@ It is destructive enough to be gated twice:
    of resetting anything.
 
 The BMC drops every IPMI session and is unreachable for roughly a minute afterwards. The
-integration expects this: for the configured **BMC reset grace period** (default 90 s) it
+integration expects this: for the configured **BMC reset grace period** (default 120 s) it
 keeps polling but treats connection failures as normal, so entities hold their last known
 state instead of flapping to unavailable and the log stays quiet. The window closes as
 soon as a poll succeeds.
