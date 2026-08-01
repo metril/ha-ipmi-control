@@ -73,11 +73,22 @@ def _check_error(stderr: str, returncode: int) -> None:
     raise HTTPException(status_code=500, detail=f"ipmitool error: {stderr}")
 
 
+# Reading column: a signed decimal (optionally in scientific notation) followed by a
+# unit, e.g. "42 degrees C", "-12.29 Volts", "3 Volts", "525 RPM".
+_READING_RE = re.compile(r"^(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s+(\S.*)$")
+
+
 def _parse_sdr_line(line: str) -> dict | None:
     """Parse a single SDR elist full output line.
 
     Format: "CPU Temp         | 01h | ok  |  3.1 | 42 degrees C"
     Returns: {"name": "CPU Temp", "value": 42.0, "unit": "degrees C", "status": "ok"}
+
+    The value/unit are extracted regardless of status. ipmitool reports readings for
+    every threshold state (ok, nc, cr, nr and their lnc/lcr/lnr/unc/ucr/unr variants) —
+    gating on status would discard a perfectly good "525 RPM" from a fan sitting at
+    lnc. Rows with no reading at all ("No Reading", "Disabled", or an empty column)
+    simply fail the regex and yield value=None, unit="".
     """
     line = line.strip()
     if not line:
@@ -93,10 +104,13 @@ def _parse_sdr_line(line: str) -> dict | None:
 
     value = None
     unit = ""
-    if status == "ok" or status == "cr":
-        match = re.match(r"([\d.]+)\s+(.*)", reading)
-        if match:
+    match = _READING_RE.match(reading)
+    if match:
+        try:
             value = float(match.group(1))
+        except ValueError:
+            value = None
+        else:
             unit = match.group(2).strip()
 
     return {"name": name, "value": value, "unit": unit, "status": status}
@@ -251,7 +265,13 @@ async def sdr_list(req: IpmiCredentials):
     for line in stdout.split("\n"):
         parsed = _parse_sdr_line(line)
         if parsed:
-            sensors.append({"name": parsed["name"], "unit": parsed["unit"]})
+            sensors.append(
+                {
+                    "name": parsed["name"],
+                    "unit": parsed["unit"],
+                    "status": parsed["status"],
+                }
+            )
 
     return {"sensors": sensors}
 
