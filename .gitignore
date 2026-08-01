@@ -4,3 +4,6 @@ docs/superpowers/
 
 # Captured BMC output used for debugging — contains host addresses
 sample_output.txt
+
+# Local scratch: handoff notes and ad-hoc verification scripts
+.dev/

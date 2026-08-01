@@ -68,7 +68,7 @@ Select a motherboard profile to pre-fill fan mode commands:
 
 ### Step 4: Sensor Selection
 
-Select which BMC sensors to expose in Home Assistant. All sensor types are supported (temperature, voltage, fan, power, current). Manual entry available as fallback.
+Select which BMC sensors to expose in Home Assistant. All sensor types are supported (temperature, voltage, fan, power, current). Sensors the BMC currently reports no reading for — unpopulated DIMM slots, empty drive bays — are labelled `(no reading)`. Manual entry available as fallback.
 
 ## Entities
 
@@ -79,9 +79,26 @@ Select which BMC sensors to expose in Home Assistant. All sensor types are suppo
 | Fan Mode | Select | Switch between configured fan modes (Administrator only) |
 | Set Sensor Thresholds | Button | Apply configured threshold overrides to the BMC (Administrator only) |
 | Refresh Sensor Thresholds | Button | Re-read current thresholds from the BMC (diagnostic) |
-| *Per-sensor* | Sensor | Temperature (°C), voltage (V), fan speed (RPM), power (W), current (A) |
+| *Per-sensor* | Sensor | Temperature (°C/°F/K), voltage (V), fan speed (rpm), power (W), current (A), percent, frequency (Hz) |
 
-All sensors with BMC thresholds show them as attributes: `lower_non_recoverable`, `lower_critical`, `lower_non_critical`, `upper_non_critical`, `upper_critical`, `upper_non_recoverable`.
+### Sensor attributes
+
+Every SDR sensor exposes a `status` attribute carrying the raw BMC state — `ok`, `ns` (no reading), or a threshold state such as `lnc` / `unc` / `cr`. A fan reading a valid RPM while sitting below its lower non-critical threshold reports `status: lnc`, which is otherwise invisible from the value alone:
+
+```yaml
+# Alert on any sensor that has left its normal range
+{{ state_attr('sensor.ipmi_node7_fan_3', 'status') not in ['ok', 'ns'] }}
+```
+
+Sensors with BMC thresholds also show them as attributes: `lower_non_recoverable`, `lower_critical`, `lower_non_critical`, `upper_non_critical`, `upper_critical`, `upper_non_recoverable`.
+
+Sensors reporting `ns` are marked **unavailable** rather than unknown, so unpopulated DIMM slots and absent drive bays stay out of history graphs and long-term statistics.
+
+### Units
+
+Units come from the BMC and are mapped to Home Assistant device classes automatically. A sensor that was unreadable when you first configured it is stored without a unit; the integration learns the unit from the first live reading that carries one and writes it back to the config entry, so no reconfiguration is needed. An already-known unit is never cleared — a fan dropping to `ns` keeps its `rpm`.
+
+Unrecognized unit strings are passed through to Home Assistant verbatim with no device class.
 
 ## Privilege Levels
 
