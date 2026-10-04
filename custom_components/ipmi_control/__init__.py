@@ -6,7 +6,7 @@ import logging
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import (
@@ -15,7 +15,6 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -27,15 +26,11 @@ from .const import (
     CONF_FAN_MODE_COMMANDS,
     CONF_FAN_MODE_QUERY_COMMAND,
     CONF_FAN_MODE_RESPONSE_MAPPING,
-    CONF_HOST_NAME,
     CONF_IPMI_IP,
     CONF_PASSWORD,
-    CONF_POWER_CONTROL,
     CONF_PRIVILEGE_LEVEL,
     CONF_USERNAME,
-    DEFAULT_POWER_CONTROL,
     DOMAIN,
-    migrate_power_control,
     signal_disarmed,
 )
 from .coordinator import IpmiDataUpdateCoordinator
@@ -143,60 +138,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         bmc_cold_reset,
         schema=DESTRUCTIVE_SERVICE_SCHEMA,
     )
-    return True
-
-
-def _migrate_unique_id(old: str, host_name: str, entry_id: str) -> str | None:
-    """Return the entry_id-keyed unique_id for an old host-keyed one, if it applies."""
-    prefix = f"ipmi_{host_name}_"
-    return f"{entry_id}_{old[len(prefix):]}" if old.startswith(prefix) else None
-
-
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate an old config entry to the current version."""
-    _LOGGER.debug("Migrating IPMI Controller entry from version %s", entry.version)
-
-    if entry.version > 4:
-        # This version of the integration cannot migrate an entry that was
-        # created by a newer version.
-        return False
-
-    if entry.version < 3:
-        new_options = dict(entry.options)
-        new_options[CONF_POWER_CONTROL] = migrate_power_control(
-            new_options.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
-        )
-        hass.config_entries.async_update_entry(
-            entry, options=new_options, version=3
-        )
-
-    if entry.version == 3:
-        host_name = entry.data[CONF_HOST_NAME]
-        dev_reg = dr.async_get(hass)
-        device = dev_reg.async_get_device(identifiers={(DOMAIN, host_name)})
-        if device is not None:
-            dev_reg.async_update_device(
-                device.id, new_identifiers={(DOMAIN, entry.entry_id)}
-            )
-
-        ent_reg = er.async_get(hass)
-        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-            new_unique_id = _migrate_unique_id(
-                ent.unique_id, host_name, entry.entry_id
-            )
-            if new_unique_id is None:
-                continue
-            if ent_reg.async_get_entity_id(ent.domain, DOMAIN, new_unique_id):
-                _LOGGER.warning(
-                    "Not migrating %s: unique ID %s is already in use",
-                    ent.entity_id,
-                    new_unique_id,
-                )
-                continue
-            ent_reg.async_update_entity(ent.entity_id, new_unique_id=new_unique_id)
-        hass.config_entries.async_update_entry(entry, version=4)
-
-    _LOGGER.debug("Migration of IPMI Controller entry to version 4 successful")
     return True
 
 
