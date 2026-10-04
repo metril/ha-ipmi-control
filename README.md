@@ -154,7 +154,7 @@ The integration communicates with the add-on via HTTP on HA's internal Docker ne
 
 ## Upgrading to 3.7.0
 
-Unique IDs are now keyed by config entry and migrate automatically on first start; downgrading below 3.7.0 is not supported.
+3.7.0 re-keyed entity unique IDs by config entry; the one-time migration was removed in 3.7.1. Entries created before 3.7.0 must be removed and re-added.
 
 ## Requirements
 
@@ -165,4 +165,4 @@ Unique IDs are now keyed by config entry and migrate automatically on first star
 
 ## Releasing (maintainers)
 
-Integration releases are cut by running the "Release" workflow (Actions → Release → Run workflow) with the tag as input, e.g. `v3.7.0`. The tag must match the version in `custom_components/ipmi_control/manifest.json`; the workflow creates the tag and the GitHub release. Add-on releases still use `addon-v*` tags.
+Integration releases are cut by running the "Release" workflow (Actions → Release → Run workflow) with the tag as input, e.g. `v3.7.1`. The tag must match the version in `custom_components/ipmi_control/manifest.json`; the workflow creates the tag and the GitHub release. Add-on releases still use `addon-v*` tags.
