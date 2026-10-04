@@ -152,6 +152,10 @@ HA Core (integration) --HTTP--> Add-on (FastAPI + ipmitool) --IPMI--> BMC
 
 The integration communicates with the add-on via HTTP on HA's internal Docker network. The add-on is stateless — credentials are sent per-request, no persistence. Per-host locks ensure one ipmitool call per BMC at a time.
 
+## Upgrading to 3.7.0
+
+Unique IDs are now keyed by config entry and migrate automatically on first start; downgrading below 3.7.0 is not supported.
+
 ## Requirements
 
 - Home Assistant OS (HAOS), Home Assistant 2025.8 or newer
@@ -161,4 +165,4 @@ The integration communicates with the add-on via HTTP on HA's internal Docker ne
 
 ## Releasing (maintainers)
 
-Integration releases are cut by running the "Release" workflow (Actions → Release → Run workflow) with the tag as input, e.g. `v3.6.0`. The tag must match the version in `custom_components/ipmi_control/manifest.json`; the workflow creates the tag and the GitHub release. Add-on releases still use `addon-v*` tags.
+Integration releases are cut by running the "Release" workflow (Actions → Release → Run workflow) with the tag as input, e.g. `v3.7.0`. The tag must match the version in `custom_components/ipmi_control/manifest.json`; the workflow creates the tag and the GitHub release. Add-on releases still use `addon-v*` tags.

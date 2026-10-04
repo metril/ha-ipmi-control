@@ -14,7 +14,6 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -27,6 +26,7 @@ from .const import (
     DEFAULT_POWER_CONTROL,
     DOMAIN,
     POWER_HARD_OFF,
+    device_info_for,
     signal_disarmed,
 )
 from .coordinator import IpmiDataUpdateCoordinator
@@ -122,13 +122,8 @@ class IpmiSetThresholdsButton(ButtonEntity):
         self._client = client
         self._entry = entry
         self._coordinator = coordinator
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_set_sensor_thresholds"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_set_sensor_thresholds"
+        self._attr_device_info = device_info_for(entry)
 
     async def async_press(self) -> None:
         """Apply all configured sensor thresholds."""
@@ -168,13 +163,8 @@ class IpmiRefreshThresholdsButton(ButtonEntity):
         """Initialize the refresh button."""
         self._entry = entry
         self._coordinator = coordinator
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_refresh_sensor_thresholds"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_refresh_sensor_thresholds"
+        self._attr_device_info = device_info_for(entry)
 
     async def async_press(self) -> None:
         """Refresh sensor thresholds from BMC."""
@@ -204,13 +194,8 @@ class IpmiForceHardOffButton(ButtonEntity):
         self._hass = hass
         self._client = client
         self._entry = entry
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_force_hard_off"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_force_hard_off"
+        self._attr_device_info = device_info_for(entry)
 
     async def async_press(self) -> None:
         """Execute hard power off if armed."""
@@ -251,13 +236,8 @@ class IpmiBmcColdResetButton(ButtonEntity):
         self._hass = hass
         self._client = client
         self._entry = entry
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_bmc_cold_reset"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_bmc_cold_reset"
+        self._attr_device_info = device_info_for(entry)
 
     async def async_press(self) -> None:
         """Cold reset the BMC if armed."""

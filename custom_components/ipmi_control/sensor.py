@@ -20,11 +20,10 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_HOST_NAME, CONF_SENSORS, DOMAIN
+from .const import CONF_SENSORS, device_info_for
 from .coordinator import IpmiDataUpdateCoordinator
 from .data import IpmiConfigEntry
 
@@ -156,9 +155,8 @@ class IpmiSdrSensor(
         """Initialize the SDR sensor."""
         super().__init__(coordinator)
         self._sensor_name = sensor_name
-        host_name = entry.data[CONF_HOST_NAME]
         safe_name = sensor_name.lower().replace(" ", "_")
-        self._attr_unique_id = f"ipmi_{host_name}_{safe_name}"
+        self._attr_unique_id = f"{entry.entry_id}_{safe_name}"
         self._attr_name = sensor_name
 
         # Seed from the unit stored in config so the entity is correct immediately
@@ -167,11 +165,7 @@ class IpmiSdrSensor(
         # learned from the first live reading that carries one.
         self._unit = unit or ""
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_device_info = device_info_for(entry)
 
         # The coordinator has already completed its first refresh by the time the
         # platform is set up, so a unit may be available right now.

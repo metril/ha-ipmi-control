@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
+
 DOMAIN = "ipmi_control"
 
 # Config entry data keys
@@ -106,3 +109,12 @@ MOTHERBOARD_PROFILES: dict[str, dict] = {
 def signal_disarmed(entry_id: str) -> str:
     """Return the dispatcher signal fired when an arm flag is consumed."""
     return f"{DOMAIN}_{entry_id}_disarmed"
+
+
+def device_info_for(entry: ConfigEntry) -> DeviceInfo:
+    """Return the device info shared by all entities of a config entry."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"IPMI {entry.data[CONF_HOST_NAME].title()}",
+        manufacturer="IPMI",
+    )
