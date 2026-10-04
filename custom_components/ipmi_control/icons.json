@@ -1,0 +1,65 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "power_state": {
+        "default": "mdi:power"
+      }
+    },
+    "button": {
+      "set_sensor_thresholds": {
+        "default": "mdi:thermometer-lines"
+      },
+      "refresh_sensor_thresholds": {
+        "default": "mdi:refresh"
+      },
+      "force_hard_off": {
+        "default": "mdi:power-off"
+      },
+      "bmc_cold_reset": {
+        "default": "mdi:restart-alert"
+      }
+    },
+    "select": {
+      "fan_mode": {
+        "default": "mdi:fan"
+      }
+    },
+    "switch": {
+      "power": {
+        "default": "mdi:server"
+      },
+      "arm_hard_off": {
+        "default": "mdi:shield-alert"
+      },
+      "arm_bmc_reset": {
+        "default": "mdi:restart-alert"
+      }
+    },
+    "sensor": {
+      "temperature": {
+        "default": "mdi:thermometer"
+      },
+      "voltage": {
+        "default": "mdi:flash-triangle"
+      },
+      "current": {
+        "default": "mdi:flash"
+      },
+      "power": {
+        "default": "mdi:flash"
+      },
+      "fan_speed": {
+        "default": "mdi:fan"
+      },
+      "percent": {
+        "default": "mdi:percent"
+      },
+      "frequency": {
+        "default": "mdi:sine-wave"
+      },
+      "generic": {
+        "default": "mdi:chip"
+      }
+    }
+  }
+}

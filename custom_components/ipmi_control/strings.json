@@ -178,7 +178,8 @@
       "commands_empty": "Enter at least one command",
       "commands_too_short": "Each command line needs at least a netfn and a command byte",
       "commands_invalid_hex": "Commands must be hex byte values, e.g. 0x30 0x45 0x01 0x00",
-      "commands_byte_range": "Byte values must be between 0x00 and 0xff"
+      "commands_byte_range": "Byte values must be between 0x00 and 0xff",
+      "unknown": "Unexpected error occurred"
     }
   },
   "services": {
@@ -209,6 +210,54 @@
           "description": "Set to true to execute immediately without requiring the host to be pre-armed via its \"BMC Reset (Arm)\" switch."
         }
       }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "power_state": {
+        "name": "Power State"
+      }
+    },
+    "button": {
+      "set_sensor_thresholds": {
+        "name": "Set Sensor Thresholds"
+      },
+      "refresh_sensor_thresholds": {
+        "name": "Refresh Sensor Thresholds"
+      },
+      "force_hard_off": {
+        "name": "Power Off (Force)"
+      },
+      "bmc_cold_reset": {
+        "name": "BMC Cold Reset"
+      }
+    },
+    "select": {
+      "fan_mode": {
+        "name": "Fan Mode"
+      }
+    },
+    "switch": {
+      "power": {
+        "name": "Power On / Shutdown"
+      },
+      "arm_hard_off": {
+        "name": "Power Off (Arm)"
+      },
+      "arm_bmc_reset": {
+        "name": "BMC Reset (Arm)"
+      }
+    }
+  },
+  "exceptions": {
+    "not_armed": {
+      "message": "This action is not armed. Turn on its arm switch first, or set confirm to true."
+    },
+    "entry_not_found": {
+      "message": "No IPMI Control config entry was found for the selected entity."
+    },
+    "requires_admin": {
+      "message": "This action requires Administrator credentials."
     }
   }
 }

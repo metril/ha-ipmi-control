@@ -6,10 +6,14 @@ import logging
 import time
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -23,43 +27,47 @@ from .const import (
     DEFAULT_POWER_CONTROL,
     DOMAIN,
     POWER_HARD_OFF,
+    signal_disarmed,
 )
 from .coordinator import IpmiDataUpdateCoordinator
-from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
+from .data import IpmiConfigEntry
+from .ipmi import IpmiAuthError, IpmiClient
+
+PARALLEL_UPDATES = 1
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_execute_bmc_cold_reset(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: IpmiConfigEntry,
     client: IpmiClient,
+    bypass_arm: bool = False,
 ) -> None:
     """Cold reset the BMC, if armed, and open the post-reset grace window.
 
     Shared by the button and the bmc_cold_reset service so both enforce the arm
-    gate identically and both start the grace period the coordinator relies on.
-    Callers that legitimately bypass the arm gate (the service's confirm: true
-    path) set the flag themselves before calling.
+    gate identically. The arm flag is consumed (and the arm switch notified)
+    before the IPMI call so concurrent presses cannot both pass the gate.
     """
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    if not entry_data.get("bmc_reset_armed", False):
-        raise HomeAssistantError("BMC cold reset is not armed")
+    runtime = entry.runtime_data
+    if not bypass_arm and not runtime.bmc_reset_armed:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="not_armed"
+        )
+    runtime.bmc_reset_armed = False
+    async_dispatcher_send(hass, signal_disarmed(entry.entry_id))
 
     try:
         await client.bmc_cold_reset()
     except IpmiAuthError as err:
         entry.async_start_reauth(hass)
         raise HomeAssistantError(str(err)) from err
-    except IpmiConnectionError as err:
-        raise HomeAssistantError(str(err)) from err
     except Exception as err:
         raise HomeAssistantError(str(err)) from err
-    finally:
-        entry_data["bmc_reset_armed"] = False
 
     grace = entry.options.get(CONF_BMC_RESET_GRACE, DEFAULT_BMC_RESET_GRACE)
-    entry_data["bmc_reset_grace_until"] = time.monotonic() + grace
+    runtime.bmc_reset_grace_until = time.monotonic() + grace
     _LOGGER.info(
         "BMC cold reset issued for %s; tolerating connection failures for %ss",
         entry.data[CONF_HOST_NAME],
@@ -69,13 +77,12 @@ async def async_execute_bmc_cold_reset(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: IpmiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up IPMI button entities from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    client: IpmiClient = data["client"]
-    coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
+    client = entry.runtime_data.client
+    coordinator = entry.runtime_data.coordinator
 
     sensors = entry.options.get(CONF_SENSORS, [])
     privilege = entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR")
@@ -103,12 +110,11 @@ class IpmiSetThresholdsButton(ButtonEntity):
     """Button to apply sensor threshold overrides."""
 
     _attr_has_entity_name = True
-    _attr_name = "Set Sensor Thresholds"
-    _attr_icon = "mdi:thermometer-lines"
+    _attr_translation_key = "set_sensor_thresholds"
 
     def __init__(
         self,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
         coordinator: IpmiDataUpdateCoordinator,
     ) -> None:
@@ -135,10 +141,11 @@ class IpmiSetThresholdsButton(ButtonEntity):
         try:
             await self._client.set_sensor_thresholds(sensors_with_thresholds)
             await self._coordinator.async_refresh_thresholds()
+        except ConfigEntryAuthFailed as err:
+            self._coordinator.config_entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(str(err)) from err
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
-            raise HomeAssistantError(str(err)) from err
-        except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
@@ -150,13 +157,12 @@ class IpmiRefreshThresholdsButton(ButtonEntity):
     """Diagnostic button to manually refresh sensor thresholds from BMC."""
 
     _attr_has_entity_name = True
-    _attr_name = "Refresh Sensor Thresholds"
-    _attr_icon = "mdi:refresh"
+    _attr_translation_key = "refresh_sensor_thresholds"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         coordinator: IpmiDataUpdateCoordinator,
     ) -> None:
         """Initialize the refresh button."""
@@ -174,6 +180,9 @@ class IpmiRefreshThresholdsButton(ButtonEntity):
         """Refresh sensor thresholds from BMC."""
         try:
             await self._coordinator.async_refresh_thresholds()
+        except ConfigEntryAuthFailed as err:
+            self._coordinator.config_entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
         _LOGGER.info("Sensor thresholds refreshed from BMC")
@@ -183,13 +192,12 @@ class IpmiForceHardOffButton(ButtonEntity):
     """Button to force hard power off (requires arming first)."""
 
     _attr_has_entity_name = True
-    _attr_name = "Power Off (Force)"
-    _attr_icon = "mdi:power-off"
+    _attr_translation_key = "force_hard_off"
 
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
     ) -> None:
         """Initialize the force hard off button."""
@@ -206,21 +214,24 @@ class IpmiForceHardOffButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Execute hard power off if armed."""
-        entry_data = self._hass.data[DOMAIN][self._entry.entry_id]
-        if not entry_data.get("hard_off_armed", False):
-            raise HomeAssistantError("Force power off is not armed")
+        runtime = self._entry.runtime_data
+        if not runtime.hard_off_armed:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="not_armed"
+            )
+        # Consume the arm flag before the (slow) IPMI call so a concurrent
+        # press cannot also pass the gate.
+        runtime.hard_off_armed = False
+        async_dispatcher_send(self._hass, signal_disarmed(self._entry.entry_id))
 
         try:
             await self._client.hard_power_off()
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
-        except IpmiConnectionError as err:
-            raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
 
-        entry_data["hard_off_armed"] = False
         _LOGGER.info("Hard power off executed")
 
 
@@ -228,13 +239,12 @@ class IpmiBmcColdResetButton(ButtonEntity):
     """Button to cold reset the BMC itself (requires arming first)."""
 
     _attr_has_entity_name = True
-    _attr_name = "BMC Cold Reset"
-    _attr_icon = "mdi:restart-alert"
+    _attr_translation_key = "bmc_cold_reset"
 
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
     ) -> None:
         """Initialize the BMC cold reset button."""

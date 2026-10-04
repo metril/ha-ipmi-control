@@ -10,7 +10,6 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     REVOLUTIONS_PER_MINUTE,
@@ -27,6 +26,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_HOST_NAME, CONF_SENSORS, DOMAIN
 from .coordinator import IpmiDataUpdateCoordinator
+from .data import IpmiConfigEntry
+
+PARALLEL_UPDATES = 0
 
 THRESHOLD_ATTR_MAP = {
     "lnr": "lower_non_recoverable",
@@ -48,56 +50,56 @@ SDR_UNIT_MAP: dict[str, dict] = {
     "degrees c": {
         "device_class": SensorDeviceClass.TEMPERATURE,
         "native_unit": UnitOfTemperature.CELSIUS,
-        "icon": "mdi:thermometer",
+        "translation_key": "temperature",
         "precision": 0,
     },
     "degrees f": {
         "device_class": SensorDeviceClass.TEMPERATURE,
         "native_unit": UnitOfTemperature.FAHRENHEIT,
-        "icon": "mdi:thermometer",
+        "translation_key": "temperature",
         "precision": 0,
     },
     "degrees k": {
         "device_class": SensorDeviceClass.TEMPERATURE,
         "native_unit": UnitOfTemperature.KELVIN,
-        "icon": "mdi:thermometer",
+        "translation_key": "temperature",
         "precision": 0,
     },
     "volts": {
         "device_class": SensorDeviceClass.VOLTAGE,
         "native_unit": UnitOfElectricPotential.VOLT,
-        "icon": "mdi:flash-triangle",
+        "translation_key": "voltage",
         "precision": 2,
     },
     "amps": {
         "device_class": SensorDeviceClass.CURRENT,
         "native_unit": UnitOfElectricCurrent.AMPERE,
-        "icon": "mdi:flash",
+        "translation_key": "current",
         "precision": 2,
     },
     "watts": {
         "device_class": SensorDeviceClass.POWER,
         "native_unit": UnitOfPower.WATT,
-        "icon": "mdi:flash",
+        "translation_key": "power",
         "precision": 0,
     },
     "rpm": {
         # HA has no fan-speed device class; the unit alone drives display.
         "device_class": None,
         "native_unit": REVOLUTIONS_PER_MINUTE,
-        "icon": "mdi:fan",
+        "translation_key": "fan_speed",
         "precision": 0,
     },
     "percent": {
         "device_class": None,
         "native_unit": PERCENTAGE,
-        "icon": "mdi:percent",
+        "translation_key": "percent",
         "precision": 0,
     },
     "hz": {
         "device_class": SensorDeviceClass.FREQUENCY,
         "native_unit": UnitOfFrequency.HERTZ,
-        "icon": "mdi:sine-wave",
+        "translation_key": "frequency",
         "precision": 0,
     },
     # Discrete sensors report a state, not a magnitude \u2014 no unit, no measurement.
@@ -122,12 +124,11 @@ def _unit_config(unit: str) -> dict:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: IpmiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up IPMI SDR sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
     sensors = entry.options.get(CONF_SENSORS, [])
     entities = [
@@ -148,7 +149,7 @@ class IpmiSdrSensor(
     def __init__(
         self,
         coordinator: IpmiDataUpdateCoordinator,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         sensor_name: str,
         unit: str,
     ) -> None:
@@ -243,9 +244,13 @@ class IpmiSdrSensor(
         return _unit_config(self._unit).get("precision")
 
     @property
-    def icon(self) -> str:
-        """Return an icon matching the resolved unit."""
-        return _unit_config(self._unit).get("icon", "mdi:chip")
+    def translation_key(self) -> str:
+        """Return the icon translation key implied by the resolved unit.
+
+        The name is set explicitly per SDR sensor, so this key only selects
+        the icon from icons.json.
+        """
+        return _unit_config(self._unit).get("translation_key", "generic")
 
     @property
     def native_value(self) -> float | None:
