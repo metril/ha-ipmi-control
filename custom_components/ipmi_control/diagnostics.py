@@ -4,36 +4,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import (
-    CONF_PASSWORD,
-    CONF_USERNAME,
-    DOMAIN,
-)
+from .const import CONF_ADDON_URL, CONF_IPMI_IP
+from .data import IpmiConfigEntry
 
-REDACTED = "**REDACTED**"
+TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, CONF_IPMI_IP, CONF_ADDON_URL}
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: IpmiConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    data = dict(entry.data)
-    # Redact credentials
-    for key in (CONF_USERNAME, CONF_PASSWORD):
-        if key in data:
-            data[key] = REDACTED
-
-    coordinator_data = None
-    if entry.entry_id in hass.data.get(DOMAIN, {}):
-        coordinator = hass.data[DOMAIN][entry.entry_id].get("coordinator")
-        if coordinator and coordinator.data:
-            coordinator_data = coordinator.data
-
+    coordinator = entry.runtime_data.coordinator
     return {
-        "config_entry_data": data,
-        "config_entry_options": dict(entry.options),
-        "coordinator_data": coordinator_data,
+        "config_entry_data": async_redact_data(dict(entry.data), TO_REDACT),
+        "config_entry_options": async_redact_data(dict(entry.options), TO_REDACT),
+        "coordinator_data": async_redact_data(coordinator.data, TO_REDACT)
+        if coordinator.data is not None
+        else None,
+        "last_update_success": coordinator.last_update_success,
     }
