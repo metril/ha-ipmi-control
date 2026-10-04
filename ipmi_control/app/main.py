@@ -28,6 +28,13 @@ class IpmiCredentials(BaseModel):
     user: str
     password: str
 
+    @field_validator("host", "user")
+    @classmethod
+    def no_leading_dash(cls, v: str) -> str:
+        if v.startswith("-"):
+            raise ValueError("value must not start with '-'")
+        return v
+
 
 class ChassisStatusRequest(IpmiCredentials):
     pass
@@ -44,6 +51,13 @@ class McResetRequest(IpmiCredentials):
 class RawCommandRequest(IpmiCredentials):
     privilege: str = "ADMINISTRATOR"
     command: str  # e.g., "raw 0x30 0x45 0x00"
+
+    @field_validator("privilege")
+    @classmethod
+    def validate_privilege(cls, v: str) -> str:
+        if v.startswith("-") or v.upper() not in {"CALLBACK", "USER", "OPERATOR", "ADMINISTRATOR"}:
+            raise ValueError("privilege must be CALLBACK, USER, OPERATOR or ADMINISTRATOR")
+        return v.upper()
 
     @field_validator("command")
     @classmethod

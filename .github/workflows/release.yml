@@ -4,10 +4,16 @@ on:
   push:
     tags:
       - "v*" # intentionally excludes addon-v* — see commit 94c47e0
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create, e.g. v3.6.0; must match custom_components/ipmi_control/manifest.json version"
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -20,6 +26,32 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Create Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' must match vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          VERSION=$(jq -r .version custom_components/ipmi_control/manifest.json)
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match manifest version v$VERSION"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists"
+            exit 1
+          fi
+          # On dispatch this creates the tag at the dispatched ref server-side.
+          # Tags created with GITHUB_TOKEN do not re-trigger the tag-push path.
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes

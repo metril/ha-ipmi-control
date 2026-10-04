@@ -154,7 +154,11 @@ The integration communicates with the add-on via HTTP on HA's internal Docker ne
 
 ## Requirements
 
-- Home Assistant OS (HAOS)
+- Home Assistant OS (HAOS), Home Assistant 2025.8 or newer
 - IPMI Control add-on installed and running
 - An IPMI-capable server with BMC accessible over the network
 - IPMI credentials (Administrator recommended, Operator for read-only)
+
+## Releasing (maintainers)
+
+Integration releases are cut by running the "Release" workflow (Actions → Release → Run workflow) with the tag as input, e.g. `v3.6.0`. The tag must match the version in `custom_components/ipmi_control/manifest.json`; the workflow creates the tag and the GitHub release. Add-on releases still use `addon-v*` tags.
