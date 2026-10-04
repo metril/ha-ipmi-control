@@ -101,3 +101,8 @@ MOTHERBOARD_PROFILES: dict[str, dict] = {
         },
     },
 }
+
+
+def signal_disarmed(entry_id: str) -> str:
+    """Return the dispatcher signal fired when an arm flag is consumed."""
+    return f"{DOMAIN}_{entry_id}_disarmed"

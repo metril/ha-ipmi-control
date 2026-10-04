@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -22,14 +21,17 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import IpmiDataUpdateCoordinator
-from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
+from .data import IpmiConfigEntry
+from .ipmi import IpmiAuthError, IpmiClient
+
+PARALLEL_UPDATES = 1
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: IpmiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up IPMI fan mode select from a config entry."""
@@ -37,9 +39,8 @@ async def async_setup_entry(
     if privilege != "ADMINISTRATOR":
         return
 
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
-    client: IpmiClient = data["client"]
+    coordinator = entry.runtime_data.coordinator
+    client = entry.runtime_data.client
 
     fan_modes = entry.options.get(CONF_FAN_MODES, [])
     if fan_modes:
@@ -52,13 +53,12 @@ class IpmiFanModeSelect(
     """Select entity for IPMI fan mode control."""
 
     _attr_has_entity_name = True
-    _attr_name = "Fan Mode"
-    _attr_icon = "mdi:fan"
+    _attr_translation_key = "fan_mode"
 
     def __init__(
         self,
         coordinator: IpmiDataUpdateCoordinator,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
     ) -> None:
         """Initialize the fan mode select."""
@@ -134,7 +134,7 @@ class IpmiFanModeSelect(
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
             raise HomeAssistantError(str(err)) from err
-        except IpmiConnectionError as err:
+        except Exception as err:
             raise HomeAssistantError(str(err)) from err
 
         # Only commit the selection once the command has actually succeeded,

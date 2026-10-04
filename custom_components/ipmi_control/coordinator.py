@@ -7,7 +7,6 @@ import logging
 import time
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import (
@@ -20,8 +19,8 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SENSORS,
     DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
 )
+from .data import IpmiConfigEntry
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,26 +32,27 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
     ) -> None:
         """Initialize the coordinator."""
         self.client = client
-        self.entry = entry
         host_name = entry.data[CONF_HOST_NAME]
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"IPMI {host_name}",
             update_interval=timedelta(seconds=scan_interval),
         )
 
     def _in_bmc_reset_grace(self) -> bool:
         """Return True while a recent BMC cold reset is still expected to bite."""
-        data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
-        return time.monotonic() < data.get("bmc_reset_grace_until", 0.0)
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        grace_until = getattr(runtime, "bmc_reset_grace_until", None)
+        return grace_until is not None and time.monotonic() < grace_until
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from IPMI, tolerating a BMC that is mid-reset.
@@ -101,7 +101,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(str(err)) from err
 
         sensor_readings: dict[str, dict] = {}
-        sensors = self.entry.options.get(CONF_SENSORS, [])
+        sensors = self.config_entry.options.get(CONF_SENSORS, [])
         if sensors:
             try:
                 all_readings = await self.client.get_sdr_readings()
@@ -117,8 +117,8 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._persist_learned_units(sensors, sensor_readings)
 
         # Fetch thresholds on first run only; subsequent refreshes are on-demand
-        sensor_thresholds = self.data.get("sensor_thresholds", {}) if self.data else {}
-        if not self.data and sensors:
+        sensor_thresholds = self.data.get("sensor_thresholds", {}) if self.data is not None else {}
+        if self.data is None and sensors:
             try:
                 sensor_thresholds = await self.client.get_all_sensor_thresholds(sensors)
             except IpmiAuthError as err:
@@ -161,11 +161,11 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         _LOGGER.debug(
-            "Updating stored SDR units for %s", self.entry.data[CONF_HOST_NAME]
+            "Updating stored SDR units for %s", self.config_entry.data[CONF_HOST_NAME]
         )
         self.hass.config_entries.async_update_entry(
-            self.entry,
-            options={**self.entry.options, CONF_SENSORS: updated},
+            self.config_entry,
+            options={**self.config_entry.options, CONF_SENSORS: updated},
         )
 
     async def async_refresh_thresholds(self) -> None:
@@ -175,7 +175,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             IpmiConnectionError: If the BMC cannot be reached or the request
                 fails. Callers must not swallow this silently.
         """
-        sensors = self.entry.options.get(CONF_SENSORS, [])
+        sensors = self.config_entry.options.get(CONF_SENSORS, [])
         if not sensors or self.data is None:
             return
         try:

@@ -7,9 +7,9 @@ import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
@@ -28,22 +28,25 @@ from .const import (
     POWER_HARD_OFF,
     POWER_ON,
     POWER_SOFT_OFF,
+    signal_disarmed,
 )
 from .coordinator import IpmiDataUpdateCoordinator
-from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
+from .data import IpmiConfigEntry
+from .ipmi import IpmiAuthError, IpmiClient
+
+PARALLEL_UPDATES = 1
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: IpmiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up IPMI power switch from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: IpmiDataUpdateCoordinator = data["coordinator"]
-    client: IpmiClient = data["client"]
+    coordinator = entry.runtime_data.coordinator
+    client = entry.runtime_data.client
 
     policy: list[str] = entry.options.get(CONF_POWER_CONTROL, DEFAULT_POWER_CONTROL)
 
@@ -69,13 +72,12 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
 
     _attr_device_class = SwitchDeviceClass.SWITCH
     _attr_has_entity_name = True
-    _attr_name = "Power On / Shutdown"
-    _attr_icon = "mdi:server"
+    _attr_translation_key = "power"
 
     def __init__(
         self,
         coordinator: IpmiDataUpdateCoordinator,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
         client: IpmiClient,
     ) -> None:
         """Initialize the switch."""
@@ -98,18 +100,25 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         if self.coordinator.data is None:
             return None
         actual = self.coordinator.data.get("power")
-        if self._optimistic_state is not None:
-            if actual == self._optimistic_state:
-                # BMC caught up, clear override
-                self._optimistic_state = None
-                self._optimistic_expiry = 0
-            elif time.monotonic() < self._optimistic_expiry:
-                return self._optimistic_state
-            else:
-                # Expired without confirmation, clear override
-                self._optimistic_state = None
-                self._optimistic_expiry = 0
+        if (
+            self._optimistic_state is not None
+            and actual != self._optimistic_state
+            and time.monotonic() < self._optimistic_expiry
+        ):
+            return self._optimistic_state
         return actual
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Clear the optimistic override once confirmed or expired."""
+        if self._optimistic_state is not None and (
+            self.coordinator.data is None
+            or self.coordinator.data.get("power") == self._optimistic_state
+            or time.monotonic() >= self._optimistic_expiry
+        ):
+            self._optimistic_state = None
+            self._optimistic_expiry = 0
+        super()._handle_coordinator_update()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the server."""
@@ -123,8 +132,6 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             await self._client.power_on()
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
-            raise HomeAssistantError(str(err)) from err
-        except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
@@ -144,8 +151,6 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
             await self._client.power_off()
         except IpmiAuthError as err:
             self._entry.async_start_reauth(self.hass)
-            raise HomeAssistantError(str(err)) from err
-        except IpmiConnectionError as err:
             raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
@@ -170,9 +175,9 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
 class IpmiArmSwitch(SwitchEntity):
     """Toggle that arms a destructive action for a short window.
 
-    Subclasses supply the hass.data flag they own and their own identity. The
-    flag is read live from hass.data rather than mirrored on the entity so the
-    button, the arm switch, and the domain services always agree on the state.
+    Subclasses supply the runtime_data flag they own and their own identity. The
+    flag is read live from runtime_data rather than mirrored on the entity so
+    the button, the arm switch, and the domain services always agree.
     """
 
     _attr_has_entity_name = True
@@ -183,7 +188,7 @@ class IpmiArmSwitch(SwitchEntity):
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: IpmiConfigEntry,
     ) -> None:
         """Initialize the arm switch."""
         self._hass = hass
@@ -200,11 +205,11 @@ class IpmiArmSwitch(SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return whether the action is armed."""
-        return self._hass.data[DOMAIN][self._entry.entry_id].get(self._arm_key, False)
+        return getattr(self._entry.runtime_data, self._arm_key)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Arm the action."""
-        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = True
+        setattr(self._entry.runtime_data, self._arm_key, True)
 
         # Cancel any existing disarm timer
         if self._disarm_cancel is not None:
@@ -224,7 +229,7 @@ class IpmiArmSwitch(SwitchEntity):
 
     def _disarm(self, write_state: bool = False) -> None:
         """Disarm and cancel the timer."""
-        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = False
+        setattr(self._entry.runtime_data, self._arm_key, False)
         if self._disarm_cancel is not None:
             self._disarm_cancel()
             self._disarm_cancel = None
@@ -234,7 +239,26 @@ class IpmiArmSwitch(SwitchEntity):
     def _auto_disarm(self, _now: Any) -> None:
         """Auto-disarm callback after timeout."""
         self._disarm_cancel = None
-        self._hass.data[DOMAIN][self._entry.entry_id][self._arm_key] = False
+        setattr(self._entry.runtime_data, self._arm_key, False)
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to disarm notifications from the buttons and services."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                signal_disarmed(self._entry.entry_id),
+                self._handle_disarmed,
+            )
+        )
+
+    @callback
+    def _handle_disarmed(self) -> None:
+        """The flag was consumed elsewhere: cancel the timer and refresh state."""
+        if self._disarm_cancel is not None:
+            self._disarm_cancel()
+            self._disarm_cancel = None
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -247,8 +271,7 @@ class IpmiArmSwitch(SwitchEntity):
 class IpmiArmHardOffSwitch(IpmiArmSwitch):
     """Toggle that arms the force power off capability."""
 
-    _attr_name = "Power Off (Arm)"
-    _attr_icon = "mdi:shield-alert"
+    _attr_translation_key = "arm_hard_off"
     _arm_key = "hard_off_armed"
     _unique_id_suffix = "arm_hard_off"
 
@@ -256,7 +279,6 @@ class IpmiArmHardOffSwitch(IpmiArmSwitch):
 class IpmiArmBmcResetSwitch(IpmiArmSwitch):
     """Toggle that arms the BMC cold reset capability."""
 
-    _attr_name = "BMC Reset (Arm)"
-    _attr_icon = "mdi:restart-alert"
+    _attr_translation_key = "arm_bmc_reset"
     _arm_key = "bmc_reset_armed"
     _unique_id_suffix = "arm_bmc_reset"

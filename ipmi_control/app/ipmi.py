@@ -46,7 +46,7 @@ async def run_ipmitool(
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
-                env={**os.environ, "IPMI_PASSWORD": password},
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "IPMI_PASSWORD": password},
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -59,8 +59,8 @@ async def run_ipmitool(
                 await proc.wait()
                 raise TimeoutError(f"ipmitool timed out after {timeout}s for {host}")
 
-            stdout = stdout_bytes.decode().strip()
-            stderr = stderr_bytes.decode().strip()
+            stdout = stdout_bytes.decode(errors="replace").strip()
+            stderr = stderr_bytes.decode(errors="replace").strip()
             return stdout, stderr, proc.returncode
 
 
