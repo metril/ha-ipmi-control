@@ -212,7 +212,7 @@ def _parse_virtual_mode_commands(
 class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for IPMI Controller."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         """Initialize the config flow."""

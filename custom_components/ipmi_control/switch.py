@@ -10,24 +10,22 @@ from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_HARD_OFF_DISARM_TIMEOUT,
-    CONF_HOST_NAME,
     CONF_POWER_CONTROL,
     CONF_POWER_STATE_HOLD,
     CONF_PRIVILEGE_LEVEL,
     DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_POWER_STATE_HOLD,
-    DOMAIN,
     POWER_HARD_OFF,
     POWER_ON,
     POWER_SOFT_OFF,
+    device_info_for,
     signal_disarmed,
 )
 from .coordinator import IpmiDataUpdateCoordinator
@@ -86,13 +84,8 @@ class IpmiPowerSwitch(CoordinatorEntity[IpmiDataUpdateCoordinator], SwitchEntity
         self._entry = entry
         self._optimistic_state: bool | None = None
         self._optimistic_expiry: float = 0
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_power"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_power"
+        self._attr_device_info = device_info_for(entry)
 
     @property
     def is_on(self) -> bool | None:
@@ -194,13 +187,8 @@ class IpmiArmSwitch(SwitchEntity):
         self._hass = hass
         self._entry = entry
         self._disarm_cancel: CALLBACK_TYPE | None = None
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_{self._unique_id_suffix}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_{self._unique_id_suffix}"
+        self._attr_device_info = device_info_for(entry)
 
     @property
     def is_on(self) -> bool:

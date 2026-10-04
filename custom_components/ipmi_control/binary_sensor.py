@@ -7,11 +7,10 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_HOST_NAME, DOMAIN
+from .const import device_info_for
 from .coordinator import IpmiDataUpdateCoordinator
 from .data import IpmiConfigEntry
 
@@ -45,13 +44,8 @@ class IpmiPowerBinarySensor(
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
-        host_name = entry.data[CONF_HOST_NAME]
-        self._attr_unique_id = f"ipmi_{host_name}_power_state"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_power_state"
+        self._attr_device_info = device_info_for(entry)
 
     @property
     def is_on(self) -> bool | None:

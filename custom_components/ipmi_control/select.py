@@ -7,7 +7,6 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -15,10 +14,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_FAN_MODE_DISPLAY_MAPPING,
     CONF_FAN_MODES,
-    CONF_HOST_NAME,
     CONF_PRIVILEGE_LEVEL,
     CONF_VIRTUAL_MODE_MAPPING,
-    DOMAIN,
+    device_info_for,
 )
 from .coordinator import IpmiDataUpdateCoordinator
 from .data import IpmiConfigEntry
@@ -65,7 +63,6 @@ class IpmiFanModeSelect(
         super().__init__(coordinator)
         self._client = client
         self._entry = entry
-        host_name = entry.data[CONF_HOST_NAME]
 
         self._display_mapping: dict[str, str] = entry.options.get(
             CONF_FAN_MODE_DISPLAY_MAPPING, {}
@@ -89,12 +86,8 @@ class IpmiFanModeSelect(
         # Track last user selection for virtual mode sync
         self._last_ha_selection: str | None = None
 
-        self._attr_unique_id = f"ipmi_{host_name}_fan_mode"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, host_name)},
-            name=f"IPMI {host_name.title()}",
-            manufacturer="IPMI",
-        )
+        self._attr_unique_id = f"{entry.entry_id}_fan_mode"
+        self._attr_device_info = device_info_for(entry)
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known display selection after startup or reload.
