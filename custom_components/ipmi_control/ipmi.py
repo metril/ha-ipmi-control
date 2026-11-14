@@ -71,14 +71,18 @@ class IpmiClient:
         }
 
     async def _request(
-        self, method: str, path: str, body: dict | None = None
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        timeout: float = 30,
     ) -> dict[str, Any]:
         """Make a request to the add-on API."""
         url = f"{self._addon_url}{path}"
         try:
             async with self._session.request(
                 method, url, json=body,
-                timeout=aiohttp.ClientTimeout(total=20),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
                 if resp.status == 401:
                     raise IpmiAuthError(await _error_detail(resp, "Auth failed"))
@@ -135,7 +139,7 @@ class IpmiClient:
         connection failures.
         """
         body = {**self._auth_body(), "action": "cold"}
-        await self._request("POST", "/api/mc/reset", body)
+        await self._request("POST", "/api/mc/reset", body, timeout=45)
 
     async def get_fan_mode(self) -> str | None:
         """Query current fan mode using configured raw command."""
@@ -218,7 +222,7 @@ class IpmiClient:
 
     # --- Threshold methods ---
 
-    async def get_sensor_thresholds(self, sensor_name: str) -> dict[str, int] | None:
+    async def get_sensor_thresholds(self, sensor_name: str) -> dict[str, float] | None:
         """Read current threshold values for a sensor."""
         body = {**self._auth_body(), "sensor_name": sensor_name}
         result = await self._request("POST", "/api/sensor/thresholds/get", body)
@@ -228,14 +232,26 @@ class IpmiClient:
 
     async def get_all_sensor_thresholds(
         self, sensors: list[dict]
-    ) -> dict[str, dict[str, int]]:
+    ) -> dict[str, dict[str, float]]:
         """Read current thresholds for all configured sensors."""
-        result: dict[str, dict[str, int]] = {}
+        result: dict[str, dict[str, float]] = {}
+        last_err: IpmiConnectionError | None = None
+        failed = 0
         for sensor in sensors:
             sensor_name = sensor["name"]
-            thresholds = await self.get_sensor_thresholds(sensor_name)
+            try:
+                thresholds = await self.get_sensor_thresholds(sensor_name)
+            except IpmiAuthError:
+                raise
+            except IpmiConnectionError as err:
+                _LOGGER.debug("Skipping thresholds for %s: %s", sensor_name, err)
+                last_err = err
+                failed += 1
+                continue
             if thresholds:
                 result[sensor_name] = thresholds
+        if sensors and last_err is not None and failed == len(sensors):
+            raise last_err
         return result
 
     async def set_sensor_thresholds(self, sensors: list[dict]) -> None:

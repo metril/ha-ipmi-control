@@ -224,6 +224,7 @@ class IpmiArmSwitch(SwitchEntity):
         if write_state:
             self.async_write_ha_state()
 
+    @callback
     def _auto_disarm(self, _now: Any) -> None:
         """Auto-disarm callback after timeout."""
         self._disarm_cancel = None

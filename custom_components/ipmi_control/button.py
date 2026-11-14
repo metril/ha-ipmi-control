@@ -58,15 +58,22 @@ async def async_execute_bmc_cold_reset(
     runtime.bmc_reset_armed = False
     async_dispatcher_send(hass, signal_disarmed(entry.entry_id))
 
+    # Open the grace window before the call: the BMC may drop polls while the
+    # reset request is still in flight.
+    grace = entry.options.get(CONF_BMC_RESET_GRACE, DEFAULT_BMC_RESET_GRACE)
+    previous_grace = runtime.bmc_reset_grace_until
+    runtime.bmc_reset_grace_until = time.monotonic() + grace
+
     try:
         await client.bmc_cold_reset()
     except IpmiAuthError as err:
+        runtime.bmc_reset_grace_until = previous_grace
         entry.async_start_reauth(hass)
         raise HomeAssistantError(str(err)) from err
     except Exception as err:
+        runtime.bmc_reset_grace_until = previous_grace
         raise HomeAssistantError(str(err)) from err
 
-    grace = entry.options.get(CONF_BMC_RESET_GRACE, DEFAULT_BMC_RESET_GRACE)
     runtime.bmc_reset_grace_until = time.monotonic() + grace
     _LOGGER.info(
         "BMC cold reset issued for %s; tolerating connection failures for %ss",
@@ -216,6 +223,8 @@ class IpmiForceHardOffButton(ButtonEntity):
             raise HomeAssistantError(str(err)) from err
         except Exception as err:
             raise HomeAssistantError(str(err)) from err
+
+        await self._entry.runtime_data.coordinator.async_request_refresh()
 
         _LOGGER.info("Hard power off executed")
 

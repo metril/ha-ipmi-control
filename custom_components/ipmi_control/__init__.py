@@ -95,8 +95,12 @@ async def _handle_force_power_off(hass: HomeAssistant, call: ServiceCall) -> Non
     _consume_arm(hass, entry, "hard_off_armed")
     try:
         await runtime.client.hard_power_off()
-    except (IpmiAuthError, IpmiConnectionError) as err:
+    except IpmiAuthError as err:
+        entry.async_start_reauth(hass)
         raise HomeAssistantError(str(err)) from err
+    except IpmiConnectionError as err:
+        raise HomeAssistantError(str(err)) from err
+    await runtime.coordinator.async_request_refresh()
 
 
 async def _handle_bmc_cold_reset(hass: HomeAssistant, call: ServiceCall) -> None:

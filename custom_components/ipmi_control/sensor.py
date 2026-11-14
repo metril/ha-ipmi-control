@@ -109,16 +109,19 @@ SDR_UNIT_MAP: dict[str, dict] = {
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
-def _unit_config(unit: str) -> dict:
+def _unit_config(unit: str) -> dict | None:
     """Resolve an ipmitool unit string to HA sensor properties.
 
     Matching is case-insensitive with whitespace collapsed, since BMCs are
     inconsistent about spelling ("degrees C" vs "Degrees  C").
+
+    Returns None for an unknown (or empty) unit, and a possibly empty dict for a
+    known one: an empty dict means "known, unitless" (e.g. discrete sensors).
     """
     if not unit:
-        return {}
+        return None
     normalized = _WHITESPACE_RE.sub(" ", unit).strip().lower()
-    return SDR_UNIT_MAP.get(normalized, {})
+    return SDR_UNIT_MAP.get(normalized)
 
 
 async def async_setup_entry(
@@ -214,12 +217,17 @@ class IpmiSdrSensor(
     @property
     def device_class(self) -> SensorDeviceClass | None:
         """Return the device class implied by the resolved unit."""
-        return _unit_config(self._unit).get("device_class")
+        return (_unit_config(self._unit) or {}).get("device_class")
 
     @property
     def native_unit_of_measurement(self) -> str | None:
         """Return the resolved unit, falling back to the raw BMC string."""
-        return _unit_config(self._unit).get("native_unit", self._unit or None)
+        config = _unit_config(self._unit)
+        if config is None:
+            # Unknown unit: fall back to the raw BMC string (None if empty).
+            return self._unit or None
+        # Known unit: the mapped native unit, or None when known to be unitless.
+        return config.get("native_unit")
 
     @property
     def state_class(self) -> SensorStateClass | None:
@@ -235,7 +243,7 @@ class IpmiSdrSensor(
     @property
     def suggested_display_precision(self) -> int | None:
         """Return the display precision implied by the resolved unit."""
-        return _unit_config(self._unit).get("precision")
+        return (_unit_config(self._unit) or {}).get("precision")
 
     @property
     def translation_key(self) -> str:
@@ -244,7 +252,7 @@ class IpmiSdrSensor(
         The name is set explicitly per SDR sensor, so this key only selects
         the icon from icons.json.
         """
-        return _unit_config(self._unit).get("translation_key", "generic")
+        return (_unit_config(self._unit) or {}).get("translation_key", "generic")
 
     @property
     def native_value(self) -> float | None:
