@@ -24,6 +24,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
@@ -249,6 +250,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                 if entry.data.get(CONF_IPMI_IP) == user_input[CONF_IPMI_IP]:
                     return self.async_abort(reason="already_configured")
 
+            await self.async_set_unique_id(user_input[CONF_HOST_NAME])
+            self._abort_if_unique_id_configured()
+
             session = async_get_clientsession(self.hass)
             addon_url = user_input[CONF_ADDON_URL]
 
@@ -295,9 +299,6 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "unknown"
 
             if not errors:
-                await self.async_set_unique_id(user_input[CONF_HOST_NAME])
-                self._abort_if_unique_id_configured()
-
                 self._data = user_input
                 self._client = None
                 return await self.async_step_power()
@@ -309,7 +310,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_HOST_NAME): str,
                     vol.Required(CONF_IPMI_IP): str,
                     vol.Required(CONF_USERNAME, default="Administrator"): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                     vol.Required(
                         CONF_PRIVILEGE_LEVEL, default="ADMINISTRATOR"
                     ): SelectSelector(
@@ -531,7 +534,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_USERNAME,
                         default=reauth_entry.data.get(CONF_USERNAME, ""),
                     ): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                     vol.Required(
                         CONF_PRIVILEGE_LEVEL,
                         default=reauth_entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR"),
@@ -630,7 +635,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_USERNAME,
                         default=reconfigure_entry.data.get(CONF_USERNAME, ""),
                     ): str,
-                    vol.Required(CONF_PASSWORD): str,
+                    vol.Required(CONF_PASSWORD): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                     vol.Required(
                         CONF_PRIVILEGE_LEVEL,
                         default=reconfigure_entry.data.get(CONF_PRIVILEGE_LEVEL, "ADMINISTRATOR"),
@@ -1125,6 +1132,7 @@ class IpmiControllerOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure thresholds for each selected sensor."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             sensor_name = self._selected_threshold_sensors[self._threshold_index]
 
@@ -1139,11 +1147,37 @@ class IpmiControllerOptionsFlow(OptionsFlowWithReload):
                 user_input.get(CONF_THRESH_UNR),
             ]
 
-            thresholds: dict[str, list[int]] = {}
-            if any(v is not None for v in lower):
-                thresholds["lower"] = [v or 0 for v in lower]
-            if any(v is not None for v in upper):
-                thresholds["upper"] = [v or 0 for v in upper]
+            # A blank field falls back to the BMC-reported current value. A group
+            # (all three values) that is partly filled and still incomplete after
+            # that is an error; a fully blank group clears the override.
+            current = await self._read_sensor_thresholds(sensor_name)
+            lower_keys = ("lnr", "lc", "lnc")
+            upper_keys = ("unc", "uc", "unr")
+            thresholds: dict[str, list[float]] = {}
+            for group, values, keys in (
+                ("lower", lower, lower_keys),
+                ("upper", upper, upper_keys),
+            ):
+                if all(v is None for v in values):
+                    continue
+                filled = [
+                    v if v is not None else current.get(k)
+                    for v, k in zip(values, keys, strict=True)
+                ]
+                if any(v is None for v in filled):
+                    errors["base"] = "thresholds_incomplete"
+                    break
+                thresholds[group] = filled
+
+            if errors:
+                return self.async_show_form(
+                    step_id="sensor_thresholds",
+                    data_schema=self.add_suggested_values_to_schema(
+                        self._threshold_schema(), dict(user_input)
+                    ),
+                    description_placeholders={"sensor_name": sensor_name},
+                    errors=errors,
+                )
 
             # Update the sensor entry in options
             for sensor in self._new_options.get(CONF_SENSORS, []):
@@ -1164,16 +1198,7 @@ class IpmiControllerOptionsFlow(OptionsFlowWithReload):
         sensor_name = self._selected_threshold_sensors[self._threshold_index]
         defaults = await self._read_sensor_thresholds(sensor_name)
 
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_THRESH_LNR): int,
-                vol.Optional(CONF_THRESH_LC): int,
-                vol.Optional(CONF_THRESH_LNC): int,
-                vol.Optional(CONF_THRESH_UNC): int,
-                vol.Optional(CONF_THRESH_UC): int,
-                vol.Optional(CONF_THRESH_UNR): int,
-            }
-        )
+        schema = self._threshold_schema()
         suggested = {
             CONF_THRESH_LNR: defaults.get("lnr"),
             CONF_THRESH_LC: defaults.get("lc"),
@@ -1188,28 +1213,40 @@ class IpmiControllerOptionsFlow(OptionsFlowWithReload):
             description_placeholders={"sensor_name": sensor_name},
         )
 
-    async def _read_sensor_thresholds(self, sensor_name: str) -> dict[str, int]:
+    @staticmethod
+    def _threshold_schema() -> vol.Schema:
+        """Schema for the per-sensor threshold form."""
+        return vol.Schema(
+            {
+                vol.Optional(CONF_THRESH_LNR): vol.Coerce(float),
+                vol.Optional(CONF_THRESH_LC): vol.Coerce(float),
+                vol.Optional(CONF_THRESH_LNC): vol.Coerce(float),
+                vol.Optional(CONF_THRESH_UNC): vol.Coerce(float),
+                vol.Optional(CONF_THRESH_UC): vol.Coerce(float),
+                vol.Optional(CONF_THRESH_UNR): vol.Coerce(float),
+            }
+        )
+
+    async def _read_sensor_thresholds(self, sensor_name: str) -> dict[str, float]:
         """Read current thresholds for a sensor from config or BMC."""
-        # Check existing config first
+        # BMC values first, then stored config overrides per key.
+        result: dict[str, float] = {}
+        try:
+            thresholds = await self._get_client().get_sensor_thresholds(sensor_name)
+            if thresholds:
+                result.update(thresholds)
+        except Exception:
+            _LOGGER.debug("Could not read thresholds for %s", sensor_name)
+
         for sensor in self.config_entry.options.get(CONF_SENSORS, []):
             if sensor["name"] == sensor_name:
-                thresholds = sensor.get("thresholds", {})
-                lower = thresholds.get("lower", [])
-                upper = thresholds.get("upper", [])
-                result: dict[str, int] = {}
+                stored = sensor.get("thresholds", {})
+                lower = stored.get("lower", [])
+                upper = stored.get("upper", [])
                 if len(lower) >= 3:
                     result.update({"lnr": lower[0], "lc": lower[1], "lnc": lower[2]})
                 if len(upper) >= 3:
                     result.update({"unc": upper[0], "uc": upper[1], "unr": upper[2]})
-                if result:
-                    return result
+                break
+        return result
 
-        # Fall back to reading from BMC
-        client = self._get_client()
-        try:
-            thresholds = await client.get_sensor_thresholds(sensor_name)
-            if thresholds:
-                return thresholds
-        except Exception:
-            _LOGGER.debug("Could not read thresholds for %s", sensor_name)
-        return {}

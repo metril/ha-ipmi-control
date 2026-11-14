@@ -8,10 +8,10 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_ADDON_URL, CONF_IPMI_IP
+from .const import CONF_ADDON_URL, CONF_HOST_NAME, CONF_IPMI_IP
 from .data import IpmiConfigEntry
 
-TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, CONF_IPMI_IP, CONF_ADDON_URL}
+TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, CONF_IPMI_IP, CONF_ADDON_URL, CONF_HOST_NAME}
 
 
 async def async_get_config_entry_diagnostics(

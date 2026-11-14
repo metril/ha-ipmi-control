@@ -3,11 +3,22 @@
 import asyncio
 import logging
 import os
+from contextlib import suppress
 
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "8"))
 SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
+
+LOCK_WAIT = 10  # seconds to wait for a busy host's lock
+
+
+class HostBusyError(Exception):
+    """Raised when the per-host lock could not be acquired in time.
+
+    Deliberately NOT a TimeoutError: /api/mc/reset treats TimeoutError as success.
+    """
+
 
 _host_locks: dict[str, asyncio.Lock] = {}
 
@@ -34,8 +45,19 @@ async def run_ipmitool(
 
     Returns (stdout, stderr, returncode).
     """
-    async with _get_host_lock(host):
-        async with SEMAPHORE:
+    lock = _get_host_lock(host)
+    try:
+        async with asyncio.timeout(LOCK_WAIT):
+            await lock.acquire()
+    except TimeoutError:
+        raise HostBusyError(f"BMC {host} is busy with another request") from None
+    try:
+        try:
+            async with asyncio.timeout(LOCK_WAIT):
+                await SEMAPHORE.acquire()
+        except TimeoutError:
+            raise HostBusyError("Too many concurrent IPMI requests") from None
+        try:
             cmd = [
                 "ipmitool", "-I", "lanplus",
                 "-H", host, "-U", user, "-E",
@@ -55,13 +77,21 @@ async def run_ipmitool(
                     proc.communicate(), timeout=timeout
                 )
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise TimeoutError(f"ipmitool timed out after {timeout}s for {host}")
+                raise TimeoutError(f"ipmitool timed out after {timeout}s for {host}") from None
+            finally:
+                # Always reap the child (timeout, cancellation, any error).
+                if proc.returncode is None:
+                    with suppress(ProcessLookupError):
+                        proc.kill()
+                    await proc.wait()
 
             stdout = stdout_bytes.decode(errors="replace").strip()
             stderr = stderr_bytes.decode(errors="replace").strip()
             return stdout, stderr, proc.returncode
+        finally:
+            SEMAPHORE.release()
+    finally:
+        lock.release()
 
 
 def is_auth_error(stderr: str) -> bool:

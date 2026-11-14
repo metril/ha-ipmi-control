@@ -171,6 +171,7 @@
       }
     },
     "error": {
+      "thresholds_incomplete": "Each threshold group (lower/upper) must have all three values, or leave the whole group empty to clear it.",
       "sdr_query_failed": "Failed to query sensors from BMC. You can enter sensor names manually below.",
       "invalid_internal_name": "Internal name must start with a lowercase letter and contain only lowercase letters, numbers, and underscores",
       "duplicate_internal_name": "This name is already used by another fan mode or virtual mode",

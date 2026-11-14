@@ -4,16 +4,15 @@ import logging
 import re
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
-from .ipmi import is_auth_error, run_ipmitool
+from .ipmi import HostBusyError, is_auth_error, run_ipmitool
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="IPMI Control", version="2.6.0")
+app = FastAPI(title="IPMI Control", version="2.7.0")
 
 # Only the documented raw-byte form is allowed, e.g. "raw 0x30 0x45 0x00".
 # Prevents argument injection into ipmitool via the /api/raw command field.
@@ -75,8 +74,8 @@ class SensorThresholdsGetRequest(IpmiCredentials):
 
 class SensorThresholdsSetRequest(IpmiCredentials):
     sensor_name: str
-    lower: list[int] | None = None  # [LNR, LC, LNC]
-    upper: list[int] | None = None  # [UNC, UC, UNR]
+    lower: list[float] | None = None  # [LNR, LC, LNC]
+    upper: list[float] | None = None  # [UNC, UC, UNR]
 
 
 # --- Helper ---
@@ -149,7 +148,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     for error in exc.errors():
         if error.get("loc") == ("body", "command"):
             return JSONResponse(status_code=400, content={"detail": error.get("msg")})
-    return await request_validation_exception_handler(request, exc)
+    # Never echo `input` (it contains the submitted password) or `ctx`.
+    safe = [
+        {k: v for k, v in err.items() if k not in ("input", "ctx")}
+        for err in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": safe})
+
+
+@app.exception_handler(TimeoutError)
+async def timeout_exception_handler(request: Request, exc: TimeoutError):
+    return JSONResponse(status_code=504, content={"detail": "ipmitool timed out"})
+
+
+@app.exception_handler(HostBusyError)
+async def host_busy_exception_handler(request: Request, exc: HostBusyError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 # --- Endpoints ---
@@ -263,9 +277,12 @@ async def sensor_thresholds_get(req: SensorThresholdsGetRequest):
     for line in stdout.split("\n"):
         for label, key in threshold_keys.items():
             if label in line:
-                match = re.search(r":\s*([\d.]+)", line)
+                match = re.search(r":\s*(-?[\d.]+)", line)
                 if match:
-                    thresholds[key] = int(float(match.group(1)))
+                    try:
+                        thresholds[key] = float(match.group(1))
+                    except ValueError:
+                        continue
 
     return thresholds
 
@@ -278,7 +295,7 @@ async def sensor_thresholds_set(req: SensorThresholdsSetRequest):
         stdout, stderr, rc = await run_ipmitool(
             req.host, req.user, req.password, "ADMINISTRATOR",
             "sensor", "thresh", req.sensor_name, "lower",
-            str(req.lower[0]), str(req.lower[1]), str(req.lower[2]),
+            f"{req.lower[0]:g}", f"{req.lower[1]:g}", f"{req.lower[2]:g}",
             timeout=10,
         )
         _check_error(stderr, rc)
@@ -288,7 +305,7 @@ async def sensor_thresholds_set(req: SensorThresholdsSetRequest):
         stdout, stderr, rc = await run_ipmitool(
             req.host, req.user, req.password, "ADMINISTRATOR",
             "sensor", "thresh", req.sensor_name, "upper",
-            str(req.upper[0]), str(req.upper[1]), str(req.upper[2]),
+            f"{req.upper[0]:g}", f"{req.upper[1]:g}", f"{req.upper[2]:g}",
             timeout=10,
         )
         _check_error(stderr, rc)

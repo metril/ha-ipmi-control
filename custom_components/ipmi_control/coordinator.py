@@ -37,6 +37,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Initialize the coordinator."""
         self.client = client
+        self._thresholds_loaded = False
         host_name = entry.data[CONF_HOST_NAME]
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
@@ -116,15 +117,19 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self._persist_learned_units(sensors, sensor_readings)
 
-        # Fetch thresholds on first run only; subsequent refreshes are on-demand
-        sensor_thresholds = self.data.get("sensor_thresholds", {}) if self.data is not None else {}
-        if self.data is None and sensors:
+        # Fetch thresholds until one fetch succeeds; afterwards refreshes are
+        # on-demand.
+        sensor_thresholds = (
+            self.data.get("sensor_thresholds", {}) if self.data is not None else {}
+        )
+        if not self._thresholds_loaded and sensors:
             try:
                 sensor_thresholds = await self.client.get_all_sensor_thresholds(sensors)
+                self._thresholds_loaded = True
             except IpmiAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
             except IpmiConnectionError as err:
-                _LOGGER.warning("Failed to fetch initial thresholds: %s", err)
+                _LOGGER.warning("Failed to fetch thresholds: %s", err)
 
         return {
             "power": power_state,
@@ -147,11 +152,14 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Only ever fills in or corrects a unit from a live non-empty reading; never
         clears one, so a fan dropping to "ns" does not lose its RPM unit.
         """
+        # Re-read at write time: the options may have changed since the caller
+        # captured `sensors`, and writing that stale list back would clobber them.
+        current: list[dict] = self.config_entry.options.get(CONF_SENSORS, [])
         updated: list[dict] = []
         changed = False
-        for sensor in sensors:
+        for sensor in current:
             live_unit = readings.get(sensor["name"], {}).get("unit")
-            if live_unit and live_unit != sensor.get("unit"):
+            if live_unit and not sensor.get("unit"):
                 updated.append({**sensor, "unit": live_unit})
                 changed = True
             else:
@@ -180,9 +188,9 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         try:
             sensor_thresholds = await self.client.get_all_sensor_thresholds(sensors)
-            self.async_set_updated_data(
-                {**self.data, "sensor_thresholds": sensor_thresholds}
-            )
+            merged = {**self.data.get("sensor_thresholds", {}), **sensor_thresholds}
+            self._thresholds_loaded = True
+            self.async_set_updated_data({**self.data, "sensor_thresholds": merged})
         except IpmiAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except IpmiConnectionError as err:

@@ -25,10 +25,10 @@ jobs:
           # the new composable build-image action does not read build.yaml itself.
           - arch: amd64
             os: ubuntu-24.04
-            build_from: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.21
+            build_from: ghcr.io/home-assistant/base-python:3.14-alpine3.24
           - arch: aarch64
             os: ubuntu-24.04-arm # native GH-hosted arm64 runner — no QEMU emulation needed
-            build_from: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.21
+            build_from: ghcr.io/home-assistant/base-python:3.14-alpine3.24
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
