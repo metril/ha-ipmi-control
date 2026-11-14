@@ -25,6 +25,8 @@ from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
+THRESHOLD_RETRY_INTERVAL = 300  # seconds between threshold fetch retries
+
 
 class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to poll IPMI state for a single host."""
@@ -38,6 +40,8 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Initialize the coordinator."""
         self.client = client
         self._thresholds_loaded = False
+        self._thresholds_next_try = 0.0
+        self._thresholds_warned = False
         host_name = entry.data[CONF_HOST_NAME]
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
@@ -117,19 +121,40 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             self._persist_learned_units(sensors, sensor_readings)
 
-        # Fetch thresholds until one fetch succeeds; afterwards refreshes are
-        # on-demand.
+        # Fetch thresholds until one fetch returns data; afterwards refreshes are
+        # on-demand. `ipmitool sensor get` fails (empty stderr) when a sensor's
+        # reading is unavailable, which is normal while the host is powered off,
+        # so skip while off and back off between attempts.
         sensor_thresholds = (
             self.data.get("sensor_thresholds", {}) if self.data is not None else {}
         )
-        if not self._thresholds_loaded and sensors:
+        now = time.monotonic()
+        if (
+            not self._thresholds_loaded
+            and sensors
+            and power_state
+            and now >= self._thresholds_next_try
+        ):
             try:
-                sensor_thresholds = await self.client.get_all_sensor_thresholds(sensors)
-                self._thresholds_loaded = True
+                fetched = await self.client.get_all_sensor_thresholds(sensors)
             except IpmiAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
             except IpmiConnectionError as err:
-                _LOGGER.warning("Failed to fetch thresholds: %s", err)
+                self._thresholds_next_try = now + THRESHOLD_RETRY_INTERVAL
+                log = _LOGGER.debug if self._thresholds_warned else _LOGGER.warning
+                self._thresholds_warned = True
+                log(
+                    "Failed to fetch thresholds (retrying in %ss): %s",
+                    THRESHOLD_RETRY_INTERVAL,
+                    err or "sensor readings unavailable",
+                )
+            else:
+                if fetched:
+                    sensor_thresholds = fetched
+                    self._thresholds_loaded = True
+                else:
+                    # No sensor reported thresholds; check again later.
+                    self._thresholds_next_try = now + THRESHOLD_RETRY_INTERVAL
 
         return {
             "power": power_state,
