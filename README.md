@@ -59,7 +59,8 @@ The add-on URL is auto-detected via Supervisor.
 | Field | Description |
 |-------|-------------|
 | **Power control policy** | `both`, `on`, `off`, or `none` |
-| **Poll interval** | How often to query the BMC (5-300 seconds, default: 10) |
+| **Poll interval** | How often to poll power state and fan mode (5-300 seconds, default: 10) |
+| **Sensor poll interval** | How often to read SDR sensors (10-3600 seconds, default: 60); also refreshed on power state change |
 
 ### Step 3: Fan Profile
 

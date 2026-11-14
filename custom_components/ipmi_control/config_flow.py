@@ -43,6 +43,7 @@ from .const import (
     CONF_POWER_CONTROL,
     CONF_PRIVILEGE_LEVEL,
     CONF_SCAN_INTERVAL,
+    CONF_SENSOR_SCAN_INTERVAL,
     CONF_SELECTED_SENSORS,
     CONF_SENSORS,
     CONF_THRESH_LC,
@@ -58,6 +59,7 @@ from .const import (
     DEFAULT_HARD_OFF_DISARM_TIMEOUT,
     DEFAULT_POWER_CONTROL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SENSOR_SCAN_INTERVAL,
     DOMAIN,
     CONF_POWER_STATE_HOLD,
     DEFAULT_POWER_STATE_HOLD,
@@ -337,6 +339,7 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._options[CONF_POWER_CONTROL] = user_input[CONF_POWER_CONTROL]
             self._options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
+            self._options[CONF_SENSOR_SCAN_INTERVAL] = user_input[CONF_SENSOR_SCAN_INTERVAL]
             self._options[CONF_POWER_STATE_HOLD] = user_input[CONF_POWER_STATE_HOLD]
             self._options[CONF_HARD_OFF_DISARM_TIMEOUT] = user_input[CONF_HARD_OFF_DISARM_TIMEOUT]
             self._options[CONF_BMC_RESET_GRACE] = user_input[CONF_BMC_RESET_GRACE]
@@ -358,6 +361,9 @@ class IpmiControllerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_SENSOR_SCAN_INTERVAL, default=DEFAULT_SENSOR_SCAN_INTERVAL
+                    ): vol.All(int, vol.Range(min=10, max=3600)),
                     vol.Required(
                         CONF_POWER_STATE_HOLD, default=DEFAULT_POWER_STATE_HOLD
                     ): vol.All(int, vol.Range(min=0, max=300)),
@@ -759,6 +765,10 @@ class IpmiControllerOptionsFlow(OptionsFlowWithReload):
                         CONF_SCAN_INTERVAL,
                         default=current_opts.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                     ): vol.All(int, vol.Range(min=5, max=300)),
+                    vol.Required(
+                        CONF_SENSOR_SCAN_INTERVAL,
+                        default=current_opts.get(CONF_SENSOR_SCAN_INTERVAL, DEFAULT_SENSOR_SCAN_INTERVAL),
+                    ): vol.All(int, vol.Range(min=10, max=3600)),
                     vol.Required(
                         CONF_POWER_STATE_HOLD,
                         default=current_opts.get(CONF_POWER_STATE_HOLD, DEFAULT_POWER_STATE_HOLD),

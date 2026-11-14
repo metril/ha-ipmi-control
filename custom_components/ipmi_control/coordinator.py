@@ -17,8 +17,10 @@ from homeassistant.helpers.update_coordinator import (
 from .const import (
     CONF_HOST_NAME,
     CONF_SCAN_INTERVAL,
+    CONF_SENSOR_SCAN_INTERVAL,
     CONF_SENSORS,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SENSOR_SCAN_INTERVAL,
 )
 from .data import IpmiConfigEntry
 from .ipmi import IpmiAuthError, IpmiClient, IpmiConnectionError
@@ -42,8 +44,14 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._thresholds_loaded = False
         self._thresholds_next_try = 0.0
         self._thresholds_warned = False
+        self._sensors_next_poll = 0.0
         host_name = entry.data[CONF_HOST_NAME]
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        sensor_interval = entry.options.get(
+            CONF_SENSOR_SCAN_INTERVAL, DEFAULT_SENSOR_SCAN_INTERVAL
+        )
+        # SDR readings can never be polled faster than the main poll.
+        self._sensor_interval = max(sensor_interval, scan_interval)
 
         super().__init__(
             hass,
@@ -105,9 +113,19 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except IpmiConnectionError as err:
                 raise UpdateFailed(str(err)) from err
 
-        sensor_readings: dict[str, dict] = {}
+        prev = self.data
+        sensor_readings: dict[str, dict] = (
+            dict(prev.get("sensor_readings", {})) if prev is not None else {}
+        )
         sensors = self.config_entry.options.get(CONF_SENSORS, [])
-        if sensors:
+        # SDR readings are the expensive call: fetch on first poll, when the
+        # slow interval elapsed, or right after a power state change.
+        sensors_due = (
+            prev is None
+            or time.monotonic() >= self._sensors_next_poll
+            or prev.get("power") != power_state
+        )
+        if sensors and sensors_due:
             try:
                 all_readings = await self.client.get_sdr_readings()
                 selected_names = {s["name"] for s in sensors}
@@ -119,6 +137,7 @@ class IpmiDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except IpmiConnectionError as err:
                 raise UpdateFailed(str(err)) from err
 
+            self._sensors_next_poll = time.monotonic() + self._sensor_interval
             self._persist_learned_units(sensors, sensor_readings)
 
         # Fetch thresholds until one fetch returns data; afterwards refreshes are

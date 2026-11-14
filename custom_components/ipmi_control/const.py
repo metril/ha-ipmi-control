@@ -20,6 +20,7 @@ CONF_PRIVILEGE_LEVEL = "privilege_level"
 # Config entry options keys
 CONF_POWER_CONTROL = "power_control"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SENSOR_SCAN_INTERVAL = "sensor_scan_interval"
 CONF_MOTHERBOARD = "motherboard"
 CONF_FAN_MODES = "fan_modes"
 CONF_FAN_MODE_COMMANDS = "fan_mode_commands"
@@ -55,6 +56,7 @@ DEFAULT_BMC_RESET_GRACE = 120
 
 # Defaults
 DEFAULT_SCAN_INTERVAL = 10
+DEFAULT_SENSOR_SCAN_INTERVAL = 60
 DEFAULT_POWER_CONTROL = [POWER_ON, POWER_SOFT_OFF]
 CONF_POWER_STATE_HOLD = "power_state_hold"
 DEFAULT_POWER_STATE_HOLD = 60
